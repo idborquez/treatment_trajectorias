@@ -1,0 +1,2254 @@
+---
+title: "Longitudinal Trajectories of Substance Use Disorder Treatment Utilization: A Latent Class Growth Analysis Using a National Cohort in Chile"
+author: "Ignacio Borquez"
+date: "`r Sys.Date()`"
+output: html_document
+bibliography: references.bib
+---
+
+# Packages
+```{r results='hide', message = FALSE, warning=FALSE}
+options(max.print=10000) # increase maxprint
+
+library(lcmm)
+library(haven)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(LCTMtools)
+library(arsenal)
+library(tidyLPA)
+library(RColorBrewer)
+library(colorspace)
+library(jmv)
+library(nnet)
+library(gtsummary)
+library(magrittr)
+library(lmtest)
+library(mice)
+library(miceadds)
+library(parameters)
+```
+
+# Loading data
+```{r include=FALSE}
+#setwd("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data") # NYU Langone PC
+setwd('C:/Users/ASUS/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data') # Personal PC
+
+# Read dataset
+df_ori <- read_dta('fiscalia_ig_bo_sep_2022_match_SENDA.dta')
+```
+
+# Data managment: monthly treatment utilization
+```{r include=FALSE}
+# Remove duplicates
+df <- df_ori %>% 
+  dplyr::distinct(df_ori$rut_enc_saf, .keep_all = TRUE) 
+
+# Delete attorney's office variables 
+df <- df[-c(4:72,74:76)] 
+
+# Converting character date variables into dates
+cols <- c("fech_ing_num_1", "fech_ing_num_2", "fech_ing_num_3", "fech_ing_num_4", "fech_ing_num_5","fech_ing_num_6",
+          "fech_ing_num_7","fech_ing_num_8","fech_ing_num_9","fech_ing_num_10",
+          "fech_egres_num_1", "fech_egres_num_2", "fech_egres_num_3", "fech_egres_num_4", "fech_egres_num_5","fech_egres_num_6",
+          "fech_egres_num_7","fech_egres_num_8","fech_egres_num_9","fech_egres_num_10")
+
+df[cols] <- lapply(df[cols], as.numeric) 
+df[cols] <- lapply(df[cols], as.Date, origin="1970-01-01")
+
+##################################################################################################################################
+## 9 years follow-up filter
+##################################################################################################################################
+df <- filter(df, fech_ing_num_1 <= "2010-11-30") 
+df <- filter(df, fech_ing_num_1 > "2009-11-30") 
+##################################################################################################################################
+
+# Treatments duration
+df$tr_dur01 <- difftime(df$fech_egres_num_1, df$fech_ing_num_1, units = "days")
+df$tr_dur01 <- as.numeric(df$tr_dur01)
+
+df$tr_dur02 <- difftime(df$fech_egres_num_2, df$fech_ing_num_2, units = "days")
+df$tr_dur02 <- as.numeric(df$tr_dur02)
+
+df$tr_dur03 <- difftime(df$fech_egres_num_3, df$fech_ing_num_3, units = "days")
+df$tr_dur03 <- as.numeric(df$tr_dur03)
+
+df$tr_dur04 <- difftime(df$fech_egres_num_4, df$fech_ing_num_4, units = "days")
+df$tr_dur04 <- as.numeric(df$tr_dur04)
+
+df$tr_dur05 <- difftime(df$fech_egres_num_5, df$fech_ing_num_5, units = "days")
+df$tr_dur05 <- as.numeric(df$tr_dur05)
+
+df$tr_dur06 <- difftime(df$fech_egres_num_6, df$fech_ing_num_6, units = "days")
+df$tr_dur06 <- as.numeric(df$tr_dur06)
+
+df$tr_dur07 <- difftime(df$fech_egres_num_7, df$fech_ing_num_7, units = "days")
+df$tr_dur07 <- as.numeric(df$tr_dur07)
+
+df$tr_dur08 <- difftime(df$fech_egres_num_8, df$fech_ing_num_8, units = "days")
+df$tr_dur08 <- as.numeric(df$tr_dur08)
+
+df$tr_dur09 <- difftime(df$fech_egres_num_9, df$fech_ing_num_9, units = "days")
+df$tr_dur09 <- as.numeric(df$tr_dur09)
+
+df$tr_dur10 <- difftime(df$fech_egres_num_10, df$fech_ing_num_10, units = "days")
+df$tr_dur10 <- as.numeric(df$tr_dur10)
+
+# On a monthly scale
+df <- df %>% 
+    mutate(across(.cols = c(124:133), .fns = ~.x / 30)) 
+
+cols <- c("tr_dur01", "tr_dur02", "tr_dur03", "tr_dur04", "tr_dur05",
+          "tr_dur06", "tr_dur07", "tr_dur08", "tr_dur09", "tr_dur10")
+
+# Rounding months
+df <- df %>% mutate_at(vars(starts_with("tr_dur")), list(~ round(., 0))) 
+
+# Between treatments duration
+df$notr_dur01 <- difftime(df$fech_ing_num_2, df$fech_egres_num_1, units = "days")
+df$notr_dur01 <- as.numeric(df$notr_dur01)
+
+df$notr_dur02 <- difftime(df$fech_ing_num_3, df$fech_egres_num_2, units = "days")
+df$notr_dur02 <- as.numeric(df$notr_dur02)
+
+df$notr_dur03 <- difftime(df$fech_ing_num_4, df$fech_egres_num_3, units = "days")
+df$notr_dur03 <- as.numeric(df$notr_dur03)
+
+df$notr_dur04 <- difftime(df$fech_ing_num_5, df$fech_egres_num_4, units = "days")
+df$notr_dur04 <- as.numeric(df$notr_dur04)
+
+df$notr_dur05 <- difftime(df$fech_ing_num_6, df$fech_egres_num_5, units = "days")
+df$notr_dur05 <- as.numeric(df$notr_dur05)
+
+df$notr_dur06 <- difftime(df$fech_ing_num_7, df$fech_egres_num_6, units = "days")
+df$notr_dur06 <- as.numeric(df$notr_dur06)
+
+df$notr_dur07 <- difftime(df$fech_ing_num_8, df$fech_egres_num_7, units = "days")
+df$notr_dur07 <- as.numeric(df$notr_dur07)
+
+df$notr_dur08 <- difftime(df$fech_ing_num_9, df$fech_egres_num_8, units = "days")
+df$notr_dur08 <- as.numeric(df$notr_dur08)
+
+df$notr_dur09 <- difftime(df$fech_ing_num_10, df$fech_egres_num_9, units = "days")
+df$notr_dur09 <- as.numeric(df$notr_dur09)
+
+# Months
+df <- df %>% 
+    mutate(across(.cols = c(134:142), .fns = ~.x / 30)) 
+
+cols <- c("notr_dur01", "notr_dur02", "notr_dur03", "notr_dur04", "notr_dur05",
+          "notr_dur06", "notr_dur07", "notr_dur08", "notr_dur09")
+
+# Rounding months
+df <- df %>% mutate_at(vars(starts_with("notr_dur")), list(~ round(., 0))) 
+
+# Total months observed
+df$tot_time <- rowSums(df[,c(124:142)], na.rm=T)
+
+# Total months from first admission to last discharge
+cols <- c("fech_egres_num_1", "fech_egres_num_2", "fech_egres_num_3", "fech_egres_num_4", "fech_egres_num_5","fech_egres_num_6",
+          "fech_egres_num_7","fech_egres_num_8","fech_egres_num_9","fech_egres_num_10")
+
+df$max_egreso <- apply(df[cols], 1, max, na.rm=T) # Max discharge
+df$max_egreso <- as.Date(df$max_egreso, origin="1970-01-01")
+df$tot_time2 <- difftime(df$max_egreso, df$fech_ing_num_1, units = "days")
+df$tot_time2 <- as.numeric(df$tot_time2)
+df$tot_time2 <- df$tot_time2/30 # Total months observed
+df$tot_time2 <- round(df$tot_time2, digits = 0) # Rounding
+df$diff <- df$tot_time-df$tot_time2 # test incongruousness between both measures
+
+# table(df$diff, useNA = "ifany")
+
+df <- df %>%
+  mutate_at(vars("tr_dur01", "tr_dur02", "tr_dur03", "tr_dur04",
+                 "tr_dur05", "tr_dur06", "tr_dur07", "tr_dur08",
+                 "tr_dur09", "tr_dur10"),
+            function(x) car::recode(x, "0=1")) # treatment episode account at least for 1 month
+
+# Assign 0 to people that didn't receive treatment
+df$tr_dur02[is.na(df$tr_dur02)] <- 0
+df$tr_dur03[is.na(df$tr_dur03)] <- 0
+df$tr_dur04[is.na(df$tr_dur04)] <- 0
+df$tr_dur05[is.na(df$tr_dur05)] <- 0
+df$tr_dur06[is.na(df$tr_dur06)] <- 0
+df$tr_dur07[is.na(df$tr_dur07)] <- 0
+df$tr_dur08[is.na(df$tr_dur08)] <- 0
+df$tr_dur09[is.na(df$tr_dur09)] <- 0
+df$tr_dur10[is.na(df$tr_dur10)] <- 0
+
+df$notr_dur01[is.na(df$notr_dur01)] <- 0
+df$notr_dur02[is.na(df$notr_dur02)] <- 0
+df$notr_dur03[is.na(df$notr_dur03)] <- 0
+df$notr_dur04[is.na(df$notr_dur04)] <- 0
+df$notr_dur05[is.na(df$notr_dur05)] <- 0
+df$notr_dur06[is.na(df$notr_dur06)] <- 0
+df$notr_dur07[is.na(df$notr_dur07)] <- 0
+df$notr_dur08[is.na(df$notr_dur08)] <- 0
+df$notr_dur09[is.na(df$notr_dur09)] <- 0
+
+# Construct monthly variables
+df <- df %>% rowwise() %>% mutate(months=list(rep(c(1,0,1,0,1,0,
+                                                    1,0,1,0,1,0,
+                                                    1,0,1,0,1,0,
+                                                    1), c(tr_dur01,notr_dur01,tr_dur02,notr_dur02,tr_dur03,notr_dur03,
+                                                          tr_dur04,notr_dur04,tr_dur05,notr_dur05,tr_dur06,notr_dur06,
+                                                          tr_dur07,notr_dur07,tr_dur08,notr_dur08,tr_dur09,notr_dur09,
+                                                          tr_dur10)))) %>% unnest_wider(months, names_sep="_")
+
+# Rename because there are more than 100 time points
+df <- df %>% rename(months_001 = months_1,
+                     months_002 = months_2,
+                     months_003 = months_3,
+                     months_004 = months_4,
+                     months_005 = months_5,
+                     months_006 = months_6,
+                     months_007 = months_7,
+                     months_008 = months_8,
+                     months_009 = months_9,
+                     months_010 = months_10,
+                     months_011 = months_11,
+                     months_012 = months_12,
+                     months_013 = months_13,
+                     months_014 = months_14,
+                     months_015 = months_15,
+                     months_016 = months_16,
+                     months_017 = months_17,
+                     months_018 = months_18,
+                     months_019 = months_19,
+                     months_020 = months_20,
+                     months_021 = months_21,
+                     months_022 = months_22,
+                     months_023 = months_23,
+                     months_024 = months_24,
+                     months_025 = months_25,
+                     months_026 = months_26,
+                     months_027 = months_27,
+                     months_028 = months_28,
+                     months_029 = months_29,
+                     months_030 = months_30,
+                     months_031 = months_31,
+                     months_032 = months_32,
+                     months_033 = months_33,
+                     months_034 = months_34,
+                     months_035 = months_35,
+                     months_036 = months_36,
+                     months_037 = months_37,
+                     months_038 = months_38,
+                     months_039 = months_39,
+                     months_040 = months_40,
+                     months_041 = months_41,
+                     months_042 = months_42,
+                     months_043 = months_43,
+                     months_044 = months_44,
+                     months_045 = months_45,
+                     months_046 = months_46,
+                     months_047 = months_47,
+                     months_048 = months_48,
+                     months_049 = months_49,
+                     months_050 = months_50,
+                     months_051 = months_51,
+                     months_052 = months_52,
+                     months_053 = months_53,
+                     months_054 = months_54,
+                     months_055 = months_55,
+                     months_056 = months_56,
+                     months_057 = months_57,
+                     months_058 = months_58,
+                     months_059 = months_59, 
+                     months_060 = months_60,
+                     months_061 = months_61,
+                     months_062 = months_62,
+                     months_063 = months_63,
+                     months_064 = months_64,
+                     months_065 = months_65,
+                     months_066 = months_66,
+                     months_067 = months_67,
+                     months_068 = months_68,
+                     months_069 = months_69, 
+                     months_070 = months_70,
+                     months_071 = months_71,
+                     months_072 = months_72,
+                     months_073 = months_73,
+                     months_074 = months_74,
+                     months_075 = months_75,
+                     months_076 = months_76,
+                     months_077 = months_77,
+                     months_078 = months_78,
+                     months_079 = months_79, 
+                     months_080 = months_80,
+                     months_081 = months_81,
+                     months_082 = months_82,
+                     months_083 = months_83,
+                     months_084 = months_84,
+                     months_085 = months_85,
+                     months_086 = months_86,
+                     months_087 = months_87,
+                     months_088 = months_88,
+                     months_089 = months_89,
+                     months_090 = months_90,
+                     months_091 = months_91,
+                     months_092 = months_92,
+                     months_093 = months_93,
+                     months_094 = months_94,
+                     months_095 = months_95,
+                     months_096 = months_96,
+                     months_097 = months_97,
+                     months_098 = months_98,
+                     months_099 = months_99)
+
+df <- df %>%
+  mutate_at(vars("tot_time"),
+            function(x) car::recode(x, "0=1"))  # Total time is at least 1 month
+
+
+## Replacing NA with 0
+df <- df %>% mutate_at(c(147:267), ~replace_na(.,0)) 
+
+# Right Censorship
+cols <- c("fech_ing_num_1", "fech_ing_num_2", "fech_ing_num_3", "fech_ing_num_4", "fech_ing_num_5","fech_ing_num_6",
+          "fech_ing_num_7","fech_ing_num_8","fech_ing_num_9","fech_ing_num_10")
+
+df$adm_censorship <- as.Date(c('2019-11-13')) # Administrative censorship
+df$observed_time <- difftime(df$adm_censorship, df$fech_ing_num_1, units = "days") # Observed time
+
+df <- df %>% 
+    mutate(across(.cols = c(269), .fns = ~.x / 30)) # Months
+
+df <- df %>% mutate_at(vars(starts_with("observed_time")), list(~ round(., 0))) #Round
+
+df <- df %>%
+  mutate_at(vars("observed_time"),
+            function(x) car::recode(x, "0=1")) # At least 1 observed month
+
+df$months_002[df$observed_time<2] <- NA
+df$months_003[df$observed_time<3] <- NA
+df$months_004[df$observed_time<4] <- NA
+df$months_005[df$observed_time<5] <- NA
+df$months_006[df$observed_time<6] <- NA
+df$months_007[df$observed_time<7] <- NA
+df$months_008[df$observed_time<8] <- NA
+df$months_009[df$observed_time<9] <- NA
+df$months_010[df$observed_time<10] <- NA
+df$months_011[df$observed_time<11] <- NA
+df$months_012[df$observed_time<12] <- NA
+df$months_013[df$observed_time<13] <- NA
+df$months_014[df$observed_time<14] <- NA
+df$months_015[df$observed_time<15] <- NA
+df$months_016[df$observed_time<16] <- NA
+df$months_017[df$observed_time<17] <- NA
+df$months_018[df$observed_time<18] <- NA
+df$months_019[df$observed_time<19] <- NA
+df$months_020[df$observed_time<20] <- NA
+df$months_021[df$observed_time<21] <- NA
+df$months_022[df$observed_time<22] <- NA
+df$months_023[df$observed_time<23] <- NA
+df$months_024[df$observed_time<24] <- NA
+df$months_025[df$observed_time<25] <- NA
+df$months_026[df$observed_time<26] <- NA
+df$months_027[df$observed_time<27] <- NA
+df$months_028[df$observed_time<28] <- NA
+df$months_029[df$observed_time<29] <- NA
+df$months_030[df$observed_time<30] <- NA
+df$months_031[df$observed_time<31] <- NA
+df$months_032[df$observed_time<32] <- NA
+df$months_033[df$observed_time<33] <- NA
+df$months_034[df$observed_time<34] <- NA
+df$months_035[df$observed_time<35] <- NA
+df$months_036[df$observed_time<36] <- NA
+df$months_037[df$observed_time<37] <- NA
+df$months_038[df$observed_time<38] <- NA
+df$months_039[df$observed_time<39] <- NA
+df$months_040[df$observed_time<40] <- NA
+df$months_041[df$observed_time<41] <- NA
+df$months_042[df$observed_time<42] <- NA
+df$months_043[df$observed_time<43] <- NA
+df$months_044[df$observed_time<44] <- NA
+df$months_045[df$observed_time<45] <- NA
+df$months_046[df$observed_time<46] <- NA
+df$months_047[df$observed_time<47] <- NA
+df$months_048[df$observed_time<48] <- NA
+df$months_049[df$observed_time<49] <- NA
+df$months_050[df$observed_time<50] <- NA
+df$months_051[df$observed_time<51] <- NA
+df$months_052[df$observed_time<52] <- NA
+df$months_053[df$observed_time<53] <- NA
+df$months_054[df$observed_time<54] <- NA
+df$months_055[df$observed_time<55] <- NA
+df$months_056[df$observed_time<56] <- NA
+df$months_057[df$observed_time<57] <- NA
+df$months_058[df$observed_time<58] <- NA
+df$months_059[df$observed_time<59] <- NA
+df$months_060[df$observed_time<60] <- NA
+df$months_061[df$observed_time<61] <- NA
+df$months_062[df$observed_time<62] <- NA
+df$months_063[df$observed_time<63] <- NA
+df$months_064[df$observed_time<64] <- NA
+df$months_065[df$observed_time<65] <- NA
+df$months_066[df$observed_time<66] <- NA
+df$months_067[df$observed_time<67] <- NA
+df$months_068[df$observed_time<68] <- NA
+df$months_069[df$observed_time<69] <- NA
+df$months_070[df$observed_time<70] <- NA
+df$months_071[df$observed_time<71] <- NA
+df$months_072[df$observed_time<72] <- NA
+df$months_073[df$observed_time<73] <- NA
+df$months_074[df$observed_time<74] <- NA
+df$months_075[df$observed_time<75] <- NA
+df$months_076[df$observed_time<76] <- NA
+df$months_077[df$observed_time<77] <- NA
+df$months_078[df$observed_time<78] <- NA
+df$months_079[df$observed_time<79] <- NA
+df$months_080[df$observed_time<80] <- NA
+df$months_081[df$observed_time<81] <- NA
+df$months_082[df$observed_time<82] <- NA
+df$months_083[df$observed_time<83] <- NA
+df$months_084[df$observed_time<84] <- NA
+df$months_085[df$observed_time<85] <- NA
+df$months_086[df$observed_time<86] <- NA
+df$months_087[df$observed_time<87] <- NA
+df$months_088[df$observed_time<88] <- NA
+df$months_089[df$observed_time<89] <- NA
+df$months_090[df$observed_time<90] <- NA
+df$months_091[df$observed_time<91] <- NA
+df$months_092[df$observed_time<92] <- NA
+df$months_093[df$observed_time<93] <- NA
+df$months_094[df$observed_time<94] <- NA
+df$months_095[df$observed_time<95] <- NA
+df$months_096[df$observed_time<96] <- NA
+df$months_097[df$observed_time<97] <- NA
+df$months_098[df$observed_time<98] <- NA
+df$months_099[df$observed_time<99] <- NA
+df$months_100[df$observed_time<100] <- NA
+df$months_101[df$observed_time<101] <- NA
+df$months_102[df$observed_time<102] <- NA
+df$months_103[df$observed_time<103] <- NA
+df$months_104[df$observed_time<104] <- NA
+df$months_105[df$observed_time<105] <- NA
+df$months_106[df$observed_time<106] <- NA
+df$months_107[df$observed_time<107] <- NA
+df$months_108[df$observed_time<108] <- NA
+df$months_109[df$observed_time<109] <- NA
+```
+
+# Covariates
+```{r}
+# Macrozone within Chile
+df[c("macrozona")] <- lapply(df[c("macrozona")], factor,
+                                 levels=c("1", 
+                                          "2",
+                                          "3"), 
+                                 labels = c("Center",
+                                            "North",
+                                            "South"))
+
+# Type of treatment plan at first entry
+df <- df %>%
+  mutate_at(vars("tipo_de_plan_2_1"),
+            function(x) car::recode(x, "1=1;4=1;5=2;2=3;6=4;3=5;NA=NA"))
+
+df$plan_1 <- df$tipo_de_plan_2_1
+df <- df %>%
+  mutate_at(vars("plan_1"),
+            function(x) car::recode(x, "1=1;2:3=2;4:5=3;NA=NA"))
+
+df[c("plan_1")] <-  lapply(df[c("plan_1")], factor,
+                                 levels=c("1", 
+                                          "2",
+                                          "3"), 
+                                 labels = c("Outpatient low intensity",
+                                            "Outpatient high intensity",
+                                            "Inpatient"))
+
+# Missing imputed:  most common type of treatment in their center
+summary(df[is.na(df$plan_1), c("plan_1", "id_centro")]) ## 5 missing imputed
+df$plan_1[df$id_centro==1 & is.na(df$plan_1)] <- "Inpatient"
+df$plan_1[df$id_centro==64 & is.na(df$plan_1)] <- "Outpatient low intensity"
+df$plan_1[df$id_centro==18 & is.na(df$plan_1)] <- "Outpatient low intensity" 
+df$plan_1[df$id_centro==41 & is.na(df$plan_1)] <- "Inpatient"
+df$plan_1[df$id_centro==57 & is.na(df$plan_1)] <- "Inpatient"
+
+# Ownership of the treatment center at first entry
+# Load treatment dataset
+load("df_centrs.RData")
+
+# Recode type of center 
+df_centrs <- df_centrs %>%
+  mutate_at(vars("facility_1"),
+            function(x) car::recode(x, '11=3;12=2;13=1;14=4;15=6;24=5;25=6;35=6'))
+
+# Recode id variable for merge
+df_centrs <- df_centrs %>% rename(rut_enc_saf = hash_key)
+
+# Delete columns
+df_centrs <- df_centrs[-c(2:202,204:212)] 
+
+# Merge
+df <- merge(df, df_centrs, by = "rut_enc_saf")
+
+# Recode type of facility
+df$facility_rec_1 <- df$facility_1
+
+df <- df %>%
+  mutate_at(vars("facility_rec_1"),
+            function(x) car::recode(x, '1:4=1;5=2;6=1'))
+
+df[c("facility_rec_1")] <- lapply(df[c("facility_rec_1")], factor,
+                                 levels=c("1", 
+                                          "2"), 
+                                 labels = c("Public",
+                                            "Private"))
+
+# Has children and urban variables
+df_com <- read_dta('fiscalia_ig_bo_feb_2023_SENDA.dta')
+
+# Urban/Rural
+df_com$urban_1 <- as.factor(df_com$clas_1)
+df_com$urban_1 <- as.numeric(df_com$urban_1)
+df_com <- df_com %>%
+  mutate_at(vars("urban_1"),
+            function(x) car::recode(x, "1=NA;3=1;2=2;4=3"))
+
+df_com[c("urban_1")] <- lapply(df_com[c("urban_1")], factor,
+                                 levels=c("1", 
+                                          "2",
+                                          "3"), 
+                                 labels = c("Rural", 
+                                            "Mixed",
+                                            "Urban"))
+
+# Has children: based on variable distribution
+df_com <- df_com %>%
+  mutate_at(vars("numero_de_hijos_mod"),
+            function(x) car::recode(x, "0=0;1=1;2=2;3:10=3"))
+
+df_com[c("numero_de_hijos_mod")] <- lapply(df_com[c("numero_de_hijos_mod")], factor,
+                                 levels=c("0", 
+                                          "1",
+                                          "2",
+                                          "3"), 
+                                 labels = c("No", 
+                                            "One",
+                                            "Two",
+                                            "Three or more"))
+
+keeps <- c("hash_key","numero_de_hijos_mod", "urban_1")
+df_com = df_com[keeps]
+df_com <- df_com %>% rename(rut_enc_saf = hash_key)
+
+df <- merge(df, df_com, by = "rut_enc_saf") ## Merge
+
+# Read dataset to extract sex and age
+df_sex <- read_dta('fiscalia_ig_bo_nov_2022_SENDA.dta')
+
+# Age at first admission
+df_sex <- df_sex %>% mutate_at(vars(starts_with("edad_al_ing_1")), list(~ round(., 0))) # rounding months
+df_sex$age <- df_sex$edad_al_ing_1
+
+# Age groups
+df_sex$age_groups <- df_sex$edad_al_ing_1
+
+df_sex <- df_sex %>%
+  mutate_at(vars("age_groups"),
+            function(x) car::recode(x, "9:29=1;30:39=2;40:49=3;50:95=4;NA=NA"))
+
+df_sex[c("age_groups")] <- lapply(df_sex[c("age_groups")], factor,
+                                 levels=c("1", 
+                                          "2",
+                                          "3",
+                                          "4"), 
+                                 labels = c("10 to 29", 
+                                            "30 to 39",
+                                            "40 to 49",
+                                            "50 or more"))
+
+# Renaming variable to merge
+df_sex <- df_sex %>% rename(rut_enc_saf = hash_key)
+
+df_sex <- df_sex[-c(3:171)] 
+
+df <- merge(df, df_sex, by = "rut_enc_saf") ## Merge
+
+## Change variable types and labels
+
+# Education
+df[c("escolaridad_rec")] <- lapply(df[c("escolaridad_rec")], factor,
+                                 levels=c("1", 
+                                          "2",
+                                          "3"), 
+                                 labels = c("More than high school", 
+                                            "Completed high school or less",
+                                            "Completed primary school or less"))
+
+# Marital status
+df[c("estado_conyugal_2")] <- lapply(df[c("estado_conyugal_2")], factor,
+                                 levels=c("1", 
+                                          "2",
+                                          "3",
+                                          "4"), 
+                                 labels = c("Married/Shared living arrangements", 
+                                            "Separated/Divorce",
+                                            "Single",
+                                            "Widower"))
+
+# Cohabitation
+df$vive_con <- df$con_quien_vive
+df <- df %>%
+  mutate_at(vars("vive_con"),
+            function(x) car::recode(x, "1=1;3=1;4=1;5=1;7=1;10:15=1;2=2;6=2;8=2;9=3;NA=NA"))
+
+df[c("vive_con")] <- lapply(df[c("vive_con")], factor,
+                                 levels=c("1", 
+                                          "2",
+                                          "3"), 
+                                 labels = c("Family", 
+                                            "Others",
+                                            "Alone"))
+
+# Employment
+df[c("estatus_ocupacional")] <- lapply(df[c("estatus_ocupacional")], factor,
+                                 levels=c("1", 
+                                          "2",
+                                          "3"), 
+                                 labels = c("Unemployed", 
+                                            "Employed",
+                                            "Inactive"))
+
+# Age as numeric
+cols <- c("age")
+df[cols] <- lapply(df[cols], as.numeric) 
+
+# Sex as factor
+df$sex <- as.factor(df$sex)
+
+# Main substance of usage
+df <- df %>%
+  mutate_at(vars("sus_principal_mod"),
+            function(x) car::recode(x, "1=1;2=2;5=3;3=4;4=5")) 
+
+df[c("sus_principal_mod")] <- lapply(df[c("sus_principal_mod")], factor,
+                                 levels=c("1", 
+                                          "2",
+                                          "3",
+                                          "4",
+                                          "5",
+                                          "6"), 
+                                 labels = c("Alcohol", 
+                                            "Cocaine hydrochloride",
+                                            "Cocaine paste",
+                                            "Cannabis",
+                                            "Other",
+                                            "NA"))
+
+df$sus_principal_mod <- droplevels(df$sus_principal_mod)
+
+# Discharge motive
+df$motivodeegreso_mod_imp_1 <- as.factor(df$motivodeegreso_mod_imp_1)
+df$motivodeegreso_mod_imp_2 <- as.factor(df$motivodeegreso_mod_imp_2)
+df$motivodeegreso_mod_imp_3 <- as.factor(df$motivodeegreso_mod_imp_3)
+df$motivodeegreso_mod_imp_4 <- as.factor(df$motivodeegreso_mod_imp_4)
+df$motivodeegreso_mod_imp_5 <- as.factor(df$motivodeegreso_mod_imp_5)
+df$motivodeegreso_mod_imp_6 <- as.factor(df$motivodeegreso_mod_imp_6)
+df$motivodeegreso_mod_imp_7 <- as.factor(df$motivodeegreso_mod_imp_7)
+df$motivodeegreso_mod_imp_8 <- as.factor(df$motivodeegreso_mod_imp_8)
+
+# First discharge
+df$motivodeegreso_mod_imp_1 <- as.numeric(df$motivodeegreso_mod_imp_1)
+df <- df %>%
+  mutate_at(vars("motivodeegreso_mod_imp_1"),
+            function(x) car::recode(x, "1=NA;3=1;2=2;4=3;5=4;6=5"))
+
+# Second-Seventh discharge
+df$motivodeegreso_mod_imp_2 <- as.numeric(df$motivodeegreso_mod_imp_2)
+df$motivodeegreso_mod_imp_3 <- as.numeric(df$motivodeegreso_mod_imp_3)
+df$motivodeegreso_mod_imp_4 <- as.numeric(df$motivodeegreso_mod_imp_4)
+df$motivodeegreso_mod_imp_5 <- as.numeric(df$motivodeegreso_mod_imp_5)
+df$motivodeegreso_mod_imp_6 <- as.numeric(df$motivodeegreso_mod_imp_6)
+df$motivodeegreso_mod_imp_7 <- as.numeric(df$motivodeegreso_mod_imp_7)
+
+df <- df %>%
+  mutate_at(vars("motivodeegreso_mod_imp_2", "motivodeegreso_mod_imp_3", "motivodeegreso_mod_imp_4", 
+                 "motivodeegreso_mod_imp_5", "motivodeegreso_mod_imp_6", "motivodeegreso_mod_imp_7"),
+            function(x) car::recode(x, "1=NA;3=1;2=2;4=3;5=4;6=5;7=6"))
+
+# Eighth discharge
+df$motivodeegreso_mod_imp_8 <- as.numeric(df$motivodeegreso_mod_imp_8)
+df <- df %>%
+  mutate_at(vars("motivodeegreso_mod_imp_8"),
+            function(x) car::recode(x, "1=NA;2=3;3=4;4=6"))
+
+# Recode discharges, to make them less complex
+df$egreso_1 <- df$motivodeegreso_mod_imp_1
+df$egreso_2 <- df$motivodeegreso_mod_imp_2
+df$egreso_3 <- df$motivodeegreso_mod_imp_3
+df$egreso_4 <- df$motivodeegreso_mod_imp_4
+df$egreso_5 <- df$motivodeegreso_mod_imp_5
+df$egreso_6 <- df$motivodeegreso_mod_imp_6
+df$egreso_7 <- df$motivodeegreso_mod_imp_7
+df$egreso_8 <- df$motivodeegreso_mod_imp_8
+df$egreso_9 <- df$motivodeegreso_mod_imp_9
+df$egreso_10 <- df$motivodeegreso_mod_imp_10
+
+df <- df %>%
+  mutate_at(vars("egreso_1", "egreso_2", "egreso_3", "egreso_4", "egreso_5",
+                 "egreso_6", "egreso_7", "egreso_8", "egreso_9", "egreso_10"),
+            function(x) car::recode(x, "1=4;2=5;3=6;4=7;5=8;6=9"))
+
+# Last treatment outcome
+df$motivoegreso_ult <- df$motivodeegreso_mod_imp_8
+df <- transform(df, motivoegreso_ult = ifelse(!is.na(motivodeegreso_mod_imp_8), motivoegreso_ult, motivodeegreso_mod_imp_7))
+df <- transform(df, motivoegreso_ult = ifelse(!is.na(motivodeegreso_mod_imp_7), motivoegreso_ult, motivodeegreso_mod_imp_6))
+df <- transform(df, motivoegreso_ult = ifelse(!is.na(motivodeegreso_mod_imp_6), motivoegreso_ult, motivodeegreso_mod_imp_5))
+df <- transform(df, motivoegreso_ult = ifelse(!is.na(motivodeegreso_mod_imp_5), motivoegreso_ult, motivodeegreso_mod_imp_4))
+df <- transform(df, motivoegreso_ult = ifelse(!is.na(motivodeegreso_mod_imp_4), motivoegreso_ult, motivodeegreso_mod_imp_3))
+df <- transform(df, motivoegreso_ult = ifelse(!is.na(motivodeegreso_mod_imp_3), motivoegreso_ult, motivodeegreso_mod_imp_2))
+df <- transform(df, motivoegreso_ult = ifelse(!is.na(motivodeegreso_mod_imp_2), motivoegreso_ult, motivodeegreso_mod_imp_1))
+
+df[c("motivodeegreso_mod_imp_1", "motivodeegreso_mod_imp_2", "motivodeegreso_mod_imp_3", "motivodeegreso_mod_imp_4",
+                 "motivodeegreso_mod_imp_5", "motivodeegreso_mod_imp_6", "motivodeegreso_mod_imp_7", "motivodeegreso_mod_imp_8", "motivoegreso_ult")] <- 
+  lapply(df[c("motivodeegreso_mod_imp_1", "motivodeegreso_mod_imp_2", "motivodeegreso_mod_imp_3", "motivodeegreso_mod_imp_4",
+                 "motivodeegreso_mod_imp_5", "motivodeegreso_mod_imp_6", "motivodeegreso_mod_imp_7", "motivodeegreso_mod_imp_8", "motivoegreso_ult")], factor,
+                                 levels=c("1", 
+                                          "2",
+                                          "3",
+                                          "4",
+                                          "5",
+                                          "6"), 
+                                 labels = c("Early discontinuation", 
+                                            "Late discontinuation",
+                                            "Administrative discharge",
+                                            "Completed treatment",
+                                            "Referral",
+                                            "Currently in treatment"))
+
+
+df[c("egreso_1", "egreso_2", "egreso_3", "egreso_4", "egreso_5",
+                 "egreso_6", "egreso_7", "egreso_8", "egreso_9", "egreso_10")] <- 
+  lapply(df[c("egreso_1", "egreso_2", "egreso_3", "egreso_4", "egreso_5",
+                 "egreso_6", "egreso_7", "egreso_8", "egreso_9", "egreso_10")], factor,
+                                 levels=c("4", 
+                                          "5",
+                                          "6",
+                                          "7",
+                                          "8",
+                                          "9"), 
+                                 labels = c("Early discontinuation", 
+                                            "Late discontinuation",
+                                            "Administrative discharge",
+                                            "Completed treatment",
+                                            "Referral",
+                                            "Currently in treatment"))
+```
+
+# Table 1
+```{r eval = FALSE}
+## Select covariables for table 1
+df_table1 <- dplyr::select(df, urban_1, sex, age, age_groups, escolaridad_rec, estatus_ocupacional, 
+                           vive_con, estado_conyugal_2, numero_de_hijos_mod, sus_principal_mod,
+                           macrozona, plan_1, facility_rec_1,
+                           duplicates_filtered, tot_time, tr_dur01, notr_dur01, tr_dur02, notr_dur02, tr_dur03, notr_dur03, tr_dur04,
+                           egreso_1, motivoegreso_ult) 
+
+# Account for the amount on people that participated in each treatment episode
+df_table1$duplicates_filtered <- as.numeric(df_table1$duplicates_filtered)
+
+df_table1$notr_dur01[df_table1$duplicates_filtered==1] <- NA
+df_table1$tr_dur02[df_table1$duplicates_filtered<2] <- NA
+df_table1$notr_dur02[df_table1$duplicates_filtered<=2] <- NA
+df_table1$tr_dur03[df_table1$duplicates_filtered<3] <- NA
+df_table1$notr_dur03[df_table1$duplicates_filtered<=3] <- NA
+df_table1$tr_dur04[df_table1$duplicates_filtered<4] <- NA
+
+# Number of treatment episodes as a factor
+df_table1$duplicates_filtered2 <- as.factor(df_table1$duplicates_filtered)
+
+# One treatment
+df_table1$one_treatment <- df_table1$duplicates_filtered
+
+df_table1 <- df_table1 %>%
+  mutate_at(vars("one_treatment"),
+            function(x) car::recode(x, "1=1;2:10=2"))
+
+df_table1[c("one_treatment")] <- lapply(df_table1[c("one_treatment")], factor,
+                                 levels=c("1", 
+                                          "2"), 
+                                 labels = c("One", 
+                                            "More than one"))
+
+traj_tab1 <- tableby(one_treatment ~ urban_1 + sex + age + age_groups + escolaridad_rec + estatus_ocupacional + 
+                                     vive_con + estado_conyugal_2 + numero_de_hijos_mod + sus_principal_mod +
+                                     macrozona + plan_1 + facility_rec_1 +
+                                     duplicates_filtered + tot_time + tr_dur01 + notr_dur01 + 
+                                     tr_dur02 + notr_dur02 + tr_dur03 + notr_dur03 + tr_dur04 +
+                                     egreso_1 + motivoegreso_ult, # Continuous
+                                     data = df_table1, numeric.stats=c("mean", "sd", "median", "min", "max", "Nmiss", "N"),
+                                     digits=1, digits.p=3, digits.pct=1)
+
+summary(traj_tab1)
+
+# Export table 1
+# write2word(traj_tab1, "Table_1.docx", title="Table 1", text=TRUE)
+```
+
+# Models - Latent Class Growth Analysis 
+## Data set
+```{r  eval=FALSE}
+# Select data set
+df2 <- df %>%
+ dplyr::select(rut_enc_saf,	plan_1, facility_rec_1, macrozona, urban_1,
+               sex, age, age_groups, escolaridad_rec, estado_conyugal_2, estatus_ocupacional, vive_con, sus_principal_mod, numero_de_hijos_mod,
+        months_001,	months_002,	months_003,	months_004,	months_005,	months_006,	months_007,	months_008,	months_009,	months_010,	months_011,	months_012,	
+        months_013,	months_014,	months_015,	months_016,	months_017,	months_018,	months_019,	months_020,	months_021,	months_022,	months_023,	months_024,	
+        months_025,	months_026,	months_027,	months_028,	months_029,	months_030,	months_031,	months_032,	months_033,	months_034,	months_035,	months_036,	
+        months_037,	months_038,	months_039,	months_040,	months_041,	months_042,	months_043,	months_044,	months_045,	months_046,	months_047,	months_048,	
+        months_049,	months_050,	months_051,	months_052,	months_053,	months_054,	months_055,	months_056,	months_057,	months_058,	months_059,	months_060,	
+        months_061,	months_062,	months_063,	months_064,	months_065,	months_066,	months_067,	months_068,	months_069,	months_070,	months_071,	months_072,
+        months_073,	months_074,	months_075,	months_076,	months_077,	months_078,	months_079,	months_080,	months_081,	months_082,	months_083,	months_084,	
+        months_085,	months_086,	months_087,	months_088,	months_089,	months_090,	months_091,	months_092,	months_093,	months_094,	months_095,	months_096,	
+        months_097,	months_098,	months_099,	months_100,	months_101,	months_102,	months_103,	months_104,	months_105,	months_106,	months_107,	months_108,	
+        months_109)
+
+# Create id for subsequent merge
+df2$id <- (c(1:6266))
+
+# Transform to long
+long <- df2 %>%
+  pivot_longer(cols=c(15:123),
+               names_to = "months", 
+               values_to = "treat_use"
+               )
+
+# Create time variable
+long$month <- NA
+long$month[long$months == 'months_001'] <- 1
+long$month[long$months == 'months_002'] <- 2
+long$month[long$months == 'months_003'] <- 3
+long$month[long$months == 'months_004'] <- 4
+long$month[long$months == 'months_005'] <- 5
+long$month[long$months == 'months_006'] <- 6
+long$month[long$months == 'months_007'] <- 7
+long$month[long$months == 'months_008'] <- 8
+long$month[long$months == 'months_009'] <- 9
+long$month[long$months == 'months_010'] <- 10
+long$month[long$months == 'months_011'] <- 11
+long$month[long$months == 'months_012'] <- 12
+long$month[long$months == 'months_013'] <- 13
+long$month[long$months == 'months_014'] <- 14
+long$month[long$months == 'months_015'] <- 15
+long$month[long$months == 'months_016'] <- 16
+long$month[long$months == 'months_017'] <- 17
+long$month[long$months == 'months_018'] <- 18
+long$month[long$months == 'months_019'] <- 19
+long$month[long$months == 'months_020'] <- 20
+long$month[long$months == 'months_021'] <- 21
+long$month[long$months == 'months_022'] <- 22
+long$month[long$months == 'months_023'] <- 23
+long$month[long$months == 'months_024'] <- 24
+long$month[long$months == 'months_025'] <- 25
+long$month[long$months == 'months_026'] <- 26
+long$month[long$months == 'months_027'] <- 27
+long$month[long$months == 'months_028'] <- 28
+long$month[long$months == 'months_029'] <- 29
+long$month[long$months == 'months_030'] <- 30
+long$month[long$months == 'months_031'] <- 31
+long$month[long$months == 'months_032'] <- 32
+long$month[long$months == 'months_033'] <- 33
+long$month[long$months == 'months_034'] <- 34
+long$month[long$months == 'months_035'] <- 35
+long$month[long$months == 'months_036'] <- 36
+long$month[long$months == 'months_037'] <- 37
+long$month[long$months == 'months_038'] <- 38
+long$month[long$months == 'months_039'] <- 39
+long$month[long$months == 'months_040'] <- 40
+long$month[long$months == 'months_041'] <- 41
+long$month[long$months == 'months_042'] <- 42
+long$month[long$months == 'months_043'] <- 43
+long$month[long$months == 'months_044'] <- 44
+long$month[long$months == 'months_045'] <- 45
+long$month[long$months == 'months_046'] <- 46
+long$month[long$months == 'months_047'] <- 47
+long$month[long$months == 'months_048'] <- 48
+long$month[long$months == 'months_049'] <- 49
+long$month[long$months == 'months_050'] <- 50
+long$month[long$months == 'months_051'] <- 51
+long$month[long$months == 'months_052'] <- 52
+long$month[long$months == 'months_053'] <- 53
+long$month[long$months == 'months_054'] <- 54
+long$month[long$months == 'months_055'] <- 55
+long$month[long$months == 'months_056'] <- 56
+long$month[long$months == 'months_057'] <- 57
+long$month[long$months == 'months_058'] <- 58
+long$month[long$months == 'months_059'] <- 59
+long$month[long$months == 'months_060'] <- 60
+long$month[long$months == 'months_061'] <- 61
+long$month[long$months == 'months_062'] <- 62
+long$month[long$months == 'months_063'] <- 63
+long$month[long$months == 'months_064'] <- 64
+long$month[long$months == 'months_065'] <- 65
+long$month[long$months == 'months_066'] <- 66
+long$month[long$months == 'months_067'] <- 67
+long$month[long$months == 'months_068'] <- 68
+long$month[long$months == 'months_069'] <- 69
+long$month[long$months == 'months_070'] <- 70
+long$month[long$months == 'months_071'] <- 71
+long$month[long$months == 'months_072'] <- 72
+long$month[long$months == 'months_073'] <- 73
+long$month[long$months == 'months_074'] <- 74
+long$month[long$months == 'months_075'] <- 75
+long$month[long$months == 'months_076'] <- 76
+long$month[long$months == 'months_077'] <- 77
+long$month[long$months == 'months_078'] <- 78
+long$month[long$months == 'months_079'] <- 79
+long$month[long$months == 'months_080'] <- 80
+long$month[long$months == 'months_081'] <- 81
+long$month[long$months == 'months_082'] <- 82
+long$month[long$months == 'months_083'] <- 83
+long$month[long$months == 'months_084'] <- 84
+long$month[long$months == 'months_085'] <- 85
+long$month[long$months == 'months_086'] <- 86
+long$month[long$months == 'months_087'] <- 87
+long$month[long$months == 'months_088'] <- 88
+long$month[long$months == 'months_089'] <- 89
+long$month[long$months == 'months_090'] <- 90
+long$month[long$months == 'months_091'] <- 91
+long$month[long$months == 'months_092'] <- 92
+long$month[long$months == 'months_093'] <- 93
+long$month[long$months == 'months_094'] <- 94
+long$month[long$months == 'months_095'] <- 95
+long$month[long$months == 'months_096'] <- 96
+long$month[long$months == 'months_097'] <- 97
+long$month[long$months == 'months_098'] <- 98
+long$month[long$months == 'months_099'] <- 99
+long$month[long$months == 'months_100'] <- 100
+long$month[long$months == 'months_101'] <- 101
+long$month[long$months == 'months_102'] <- 102
+long$month[long$months == 'months_103'] <- 103
+long$month[long$months == 'months_104'] <- 104
+long$month[long$months == 'months_105'] <- 105
+long$month[long$months == 'months_106'] <- 106
+long$month[long$months == 'months_107'] <- 107
+long$month[long$months == 'months_108'] <- 108
+long$month[long$months == 'months_109'] <- 109
+```
+
+## Model estimation
+```{r eval=FALSE}
+# Linear
+
+# 1 class
+set.seed(2002)
+m2_1 <- lcmm(treat_use ~ month ,
+               random= ~ 1,
+               data=long,
+               subject="id",
+               link="thresholds",
+               nproc = 16)
+save(m2_1, file = "lcga_ft_linear_n1.Rda")
+
+# 2 classes
+set.seed(2002)
+m2_1_ng2 <- lcmm(fixed = treat_use ~ month,
+                         mixture = ~ month,
+                         random= ~ 1, 
+                         link="thresholds",
+                         subject = "id",
+                         ng=2,
+                         data = long,
+                         maxiter = 500,
+                         verbose = TRUE,
+                         nproc = 16,
+                         B = random(m2_1))
+
+save(m2_1_ng2, file = "lcga_ft_linear_n2.Rda")
+
+# 3 classes
+set.seed(2002)
+m2_1_ng3 <- lcmm(fixed = treat_use ~ month,
+                         mixture = ~ month,
+                         random= ~ 1, 
+                         link="thresholds",
+                         subject = "id",
+                         ng=3,
+                         data = long,
+                         maxiter = 500,
+                         verbose = TRUE,
+                         nproc = 16,
+                         B = random(m2_1))
+save(m2_1_ng3, file = "lcga_ft_linear_n3.Rda")
+
+# 4 classes
+set.seed(2002)
+m2_1_ng4 <- lcmm(fixed = treat_use ~ month,
+                         mixture = ~ month,
+                         random= ~ 1, 
+                         link="thresholds",
+                         subject = "id",
+                         ng=4,
+                         data = long,
+                         maxiter = 500,
+                         verbose = TRUE,
+                         nproc = 16,
+                         B = random(m2_1))
+
+save(m2_1_ng4, file = "lcga_ft_linear_n4.Rda")
+
+# 5 classes
+set.seed(2002)
+m2_1_ng5 <- lcmm(fixed = treat_use ~ month,
+                         mixture = ~ month,
+                         random= ~ 1, 
+                         link="thresholds",
+                         subject = "id",
+                         ng=5,
+                         data = long,
+                         maxiter = 500,
+                         verbose = TRUE,
+                         nproc = 16,
+                         B = random(m2_1))
+
+save(m2_1_ng5, file = "lcga_ft_linear_n5.Rda")
+
+# 6 classes
+set.seed(2002)
+m2_1_ng6 <- lcmm(fixed = treat_use ~ month,
+                         mixture = ~ month,
+                         random= ~ 1, 
+                         link="thresholds",
+                         subject = "id",
+                         ng=6,
+                         data = long,
+                         maxiter = 500,
+                         verbose = TRUE,
+                         nproc = 16,
+                         B = random(m2_1))
+
+save(m2_1_ng6, file = "lcga_ft_linear_n6.Rda")
+
+# 7 classes
+set.seed(2002)
+m2_1_ng7 <- lcmm(fixed = treat_use ~ month ,
+                         mixture = ~ month ,
+                         random= ~ 1, 
+                         link="thresholds",
+                         subject = "id",
+                         ng=7,
+                         data = long,
+                         maxiter = 500,
+                         verbose = TRUE,
+                         nproc = 16,
+                         B = random(m2_1))
+
+save(m2_1_ng7, file = "lcga_ft_linear_n7.Rda")
+
+# Quadratic
+
+# 1 class
+set.seed(2002)
+m2_2 <- lcmm(treat_use ~ month+I(month^2),
+               random= ~ 1,
+               data=long,
+               subject="id",
+               link="thresholds",
+               nproc = 16)
+
+save(m2_2, file = "lcga_ft_quadratic_n1.Rda")
+
+# 2 classes
+set.seed(2002)
+m2_2_ng2 <- lcmm(fixed = treat_use ~ month+I(month^2),
+                         mixture = ~ month+I(month^2),
+                         random= ~ 1, 
+                         link="thresholds",
+                         subject = "id",
+                         ng=2,
+                         data = long,
+                         maxiter = 500,
+                         verbose = TRUE,
+                         nproc = 16,
+                         B = random(m2_2))
+
+save(m2_2_ng2, file = "lcga_ft_quadratic_n2.Rda")
+
+
+# 3 classes
+set.seed(2002)
+m2_2_ng3 <- lcmm(fixed = treat_use ~ month+I(month^2),
+                         mixture = ~ month+I(month^2),
+                         random= ~ 1, 
+                         link="thresholds",
+                         subject = "id",
+                         ng=3,
+                         data = long,
+                         maxiter = 500,
+                         verbose = TRUE,
+                         nproc = 16,
+                         B = random(m2_2))
+
+save(m2_2_ng3, file = "lcga_ft_quadratic_n3.Rda")
+
+# 4 classes
+set.seed(2002)
+m2_2_ng4 <- lcmm(fixed = treat_use ~ month+I(month^2),
+                         mixture = ~ month+I(month^2),
+                         random= ~ 1, 
+                         link="thresholds",
+                         subject = "id",
+                         ng=4,
+                         data = long,
+                         maxiter = 500,
+                         verbose = TRUE,
+                         nproc = 16,
+                         B = random(m2_2))
+
+save(m2_2_ng4, file = "lcga_ft_quadratic_n4.Rda")
+
+# 5 classes
+set.seed(2002)
+m2_2_ng5 <- lcmm(fixed = treat_use ~ month+I(month^2),
+                         mixture = ~ month+I(month^2),
+                         random= ~ 1, 
+                         link="thresholds",
+                         subject = "id",
+                         ng=5,
+                         data = long,
+                         maxiter = 500,
+                         verbose = TRUE,
+                         nproc = 16,
+                         B = random(m2_2))
+
+save(m2_2_ng5, file = "lcga_ft_quadratic_n5.Rda")
+
+# 6 classes
+set.seed(2002)
+m2_2_ng6 <- lcmm(fixed = treat_use ~ month+I(month^2),
+                         mixture = ~ month+I(month^2),
+                         random= ~ 1, 
+                         link="thresholds",
+                         subject = "id",
+                         ng=6,
+                         data = long,
+                         maxiter = 500,
+                         verbose = TRUE,
+                         nproc = 16,
+                         B = random(m2_2))
+
+save(m2_2_ng6, file = "lcga_ft_quadratic_n6.Rda")
+
+# 7 classes
+set.seed(2002)
+m2_2_ng7 <- lcmm(fixed = treat_use ~ month+I(month^2),
+                         mixture = ~ month+I(month^2),
+                         random= ~ 1, 
+                         link="thresholds",
+                         subject = "id",
+                         ng=7,
+                         data = long,
+                         maxiter = 500,
+                         verbose = TRUE,
+                         nproc = 16,
+                         B = random(m2_2))
+
+save(m2_2_ng7, file = "lcga_ft_quadratic_n7.Rda")
+
+# 8 classes
+set.seed(2002)
+m2_2_ng8 <- lcmm(fixed = treat_use ~ month+I(month^2),
+                         mixture = ~ month+I(month^2),
+                         random= ~ 1, 
+                         link="thresholds",
+                         subject = "id",
+                         ng=8,
+                         data = long,
+                         maxiter = 500,
+                         verbose = TRUE,
+                         nproc = 16,
+                         B = random(m2_2))
+
+save(m2_2_ng8, file = "lcga_ft_quadratic_n8.Rda")
+```
+
+# Load models
+## Linear
+```{r eval=FALSE}
+# Linear
+
+# Linear - n=1
+load("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_linear_n1.Rda")
+
+# Linear - n=2
+load("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_linear_n2.Rda")
+summary(m2_1_ng2) # Summary
+postprob(m2_1_ng2) # Posterior probabilities
+
+# Linear - n=3
+load("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_linear_n3.Rda")
+summary(m2_1_ng3) # Summary
+postprob(m2_1_ng3) # Posterior probabilities
+
+# Linear - n=4
+load("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_linear_n4.Rda")
+summary(m2_1_ng4) # Summary
+postprob(m2_1_ng4) # Posterior probabilities
+
+# Linear - n=5
+load("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_linear_n5.Rda")
+summary(m2_1_ng5) # Summary
+postprob(m2_1_ng5) # Posterior probabilities
+
+# Linear - n=6
+load("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_linear_n6.Rda")
+summary(m2_1_ng6) # Summary
+postprob(m2_1_ng6) # Posterior probabilities
+
+# Linear - n=7
+load("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_linear_n7.Rda")
+summary(m2_1_ng7) # Summary
+postprob(m2_1_ng7) # Posterior probabilities
+
+# Linear - n=8
+load("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_linear_n8.Rda")
+summary(m2_1_ng8) # Summary
+postprob(m2_1_ng8) # Posterior probabilities
+
+# Compare fit
+summarytable(m2_1, m2_1_ng2, m2_1_ng3, m2_1_ng4, m2_1_ng5, m2_1_ng6, m2_1_ng7, m2_1_ng8, which = c("G", "loglik", "conv", "npm", "AIC", "BIC", "SABIC", "ICL", "entropy", "%class"))
+```
+
+## Quadratic
+```{r eval=FALSE}
+# Quadratic
+
+# Quadratic - n=1
+load("C:/Users/ASUS/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n1.Rda")
+
+# Quadratic - n=2
+load("C:/Users/ASUS/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n2.Rda")
+summary(m2_2_ng2) # Summary
+postprob(m2_2_ng2) # Posterior probabilities
+
+# Quadratic - n=3
+load("C:/Users/ASUS/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n3.Rda")
+summary(m2_2_ng3) # Summary
+postprob(m2_2_ng3) # Posterior probabilities
+
+# Quadratic - n=4
+load("C:/Users/ASUS/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n4.Rda")
+summary(m2_2_ng4) # Summary
+postprob(m2_2_ng4) # Posterior probabilities
+
+# Quadratic - n=5
+load("C:/Users/ASUS/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n5.Rda")
+summary(m2_2_ng5) # Summary
+postprob(m2_2_ng5) # Posterior probabilities
+
+# Quadratic - n=6
+#load("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n6.Rda")
+load("C:/Users/ASUS/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n6.Rda")
+
+summary(m2_2_ng6) # Summary
+postprob(m2_2_ng6) # Posterior probabilities
+
+# Quadratic - n=7
+#load("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n7.Rda")
+load("C:/Users/ASUS/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n7.Rda")
+
+summary(m2_2_ng7) # Summary
+postprob(m2_2_ng7) # Posterior probabilities
+
+# Compare fit
+summarytable(m2_2, m2_2_ng2, m2_2_ng3, m2_2_ng4, m2_2_ng5, m2_2_ng6, m2_2_ng7, which = c("G", "loglik", "conv", "npm", "AIC", "BIC", "SABIC", "ICL", "entropy", "%class"))
+```
+
+# Sensitivity analysis: Compare 6 and 7 class solution: is the 7th class distinct in key variables?
+```{r eval=FALSE}
+# Quadratic - n=6
+#load("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n6.Rda")
+load("C:/Users/ASUS/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n6.Rda")
+
+summary(m2_2_ng6) # Summary
+postprob(m2_2_ng6) # Posterior probabilities
+
+# Quadratic - n=7
+#load("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n7.Rda")
+load("C:/Users/ASUS/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n7.Rda")
+
+summary(m2_2_ng7) # Summary
+postprob(m2_2_ng7) # Posterior probabilities
+
+# Create id
+df_compare <- as.data.frame(c(1:6266))
+df_compare <- df_compare %>% rename("id" = "c(1:6266)")
+
+# Take results of model
+pprob_n6 <- m2_2_ng6$pprob
+df_compare <- merge(df_compare, pprob_n6, by = "id") 
+df_compare <- df_compare %>% rename(class_n6 = class)
+df_compare <- df_compare %>%
+  mutate_at(vars("class_n6"),
+            function(x) car::recode(x, "1=1;6=2;5=3;3=4;2=5;4=6")) 
+
+# Label trajectories
+df_compare[c("class_n6")] <- lapply(df_compare[c("class_n6")], factor,
+                                 levels=c("1", 
+                                          "2",
+                                          "3",
+                                          "4",
+                                          "5",
+                                          "6"), 
+                                 labels = c("Early discontinuation",
+                                            "Late discontinuation",
+                                            "Long first treatment",
+                                            "Decreasing",
+                                            "Steady/recurrent",
+                                            "Recurrent after long period"))
+df_compare <- df_compare[-c(3:8)] 
+
+# See 7 class solution
+pprob_n7 <- m2_2_ng7$pprob
+df_compare <- merge(df_compare, pprob_n7, by = "id") 
+df_compare <- df_compare %>% rename(class_n7 = class)
+
+df_compare <- df_compare %>%
+  mutate_at(vars("class_n7"),
+            function(x) car::recode(x, "3=1;6=2;5=3;2=4;1=5;7=6;4=7")) 
+
+df_compare[c("class_n7")] <- lapply(df_compare[c("class_n7")], factor,
+                                 levels=c("1", 
+                                          "2",
+                                          "3",
+                                          "4",
+                                          "5",
+                                          "6",
+                                          "7"), 
+                                 labels = c("Early discontinuation",
+                                            "Less than a year in treatment",
+                                            "Year-long episode, no recurrence",
+                                            "Long first treatment, or immediate recurrence",
+                                            "Recurrent and decreasing",
+                                            "Early discontinuation with recurrence",
+                                            "Recurrent after long between treatments periods"))
+
+tab1 <- tableby(class_n7 ~ class_n6, data=df_compare)
+
+# Compare 6 and 7th class solutions
+summary(tab1, text=TRUE)
+
+### LMR-LRT
+# store values baseline model
+n <- m2_2_ng6$ns #number of observations (should be equal in both models)
+null_ll <- m2_2_ng6$loglik #log-likelihood
+null_param <- 24 # number of parameters
+null_classes <- 6 # number of classes
+
+# Store values alternative model
+alt_ll <- m2_2_ng7$loglik #log-likelihood
+alt_param <- 28 # number of parameters
+alt_classes <- 7 # number of classes
+
+# use calc_lrt from tidyLPA package
+calc_lrt(n, null_ll, null_param, null_classes, alt_ll, alt_param, alt_classes) # p < 0.001 --> 7th class solution provides information
+
+# Further fit statistics
+LCTMtoolkit(m2_2_ng6)
+LCTMtoolkit(m2_2_ng7)
+LCTMcompare(m2_2_ng6, m2_2_ng7)
+```
+
+## Table
+```{r}
+#df <- df_f
+load("Output/LCGA/108 time points/lcga_ft_quadratic_n7.Rda") ## Load 7-class solution
+
+df_table2 <- df
+################ ADD RESULTS OF TREATMENT ######################
+# Account for the amount on people that participated in each treatment episode
+df_table2$duplicates_filtered <- as.numeric(df_table2$duplicates_filtered)
+
+df_table2$notr_dur01[df_table2$duplicates_filtered==1] <- NA
+df_table2$tr_dur02[df_table2$duplicates_filtered<2] <- NA
+df_table2$notr_dur02[df_table2$duplicates_filtered<=2] <- NA
+df_table2$tr_dur03[df_table2$duplicates_filtered<3] <- NA
+df_table2$notr_dur03[df_table2$duplicates_filtered<=3] <- NA
+df_table2$tr_dur04[df_table2$duplicates_filtered<4] <- NA
+df_table2$notr_dur04[df_table2$duplicates_filtered<=4] <- NA
+df_table2$tr_dur05[df_table2$duplicates_filtered<5] <- NA
+df_table2$notr_dur05[df_table2$duplicates_filtered<=5] <- NA
+df_table2$tr_dur06[df_table2$duplicates_filtered<6] <- NA
+df_table2$notr_dur06[df_table2$duplicates_filtered<=6] <- NA
+df_table2$tr_dur07[df_table2$duplicates_filtered<7] <- NA
+df_table2$notr_dur07[df_table2$duplicates_filtered<=7] <- NA
+df_table2$tr_dur08[df_table2$duplicates_filtered<8] <- NA
+df_table2$notr_dur08[df_table2$duplicates_filtered<=8] <- NA
+df_table2$tr_dur09[df_table2$duplicates_filtered<9] <- NA
+df_table2$notr_dur09[df_table2$duplicates_filtered<=9] <- NA
+df_table2$tr_dur10[df_table2$duplicates_filtered<10] <- NA
+
+df_table2$duplicates_filtered2 <- as.factor(df_table2$duplicates_filtered)
+
+# Select covariables for the model
+df_table2$id <- (c(1:6266))
+
+# See 7 class solution
+pprob_n7 <- m2_2_ng7$pprob
+pprob_n7 <- pprob_n7 %>% rename(class_n7 = class)
+df_table2 <- merge(df_table2, pprob_n7, by = "id") 
+
+df_table2 <- df_table2 %>%
+  mutate_at(vars("class_n7"),
+            function(x) car::recode(x, "3=1;6=2;5=3;2=4;1=5;7=6;4=7")) 
+
+df_table2[c("class_n7")] <- lapply(df_table2[c("class_n7")], factor,
+                                 levels=c("1", 
+                                          "2",
+                                          "3",
+                                          "4",
+                                          "5",
+                                          "6",
+                                          "7"), 
+                                 labels = c("Early discontinuation",
+                                            "Less than a year in treatment",
+                                            "Year-long episode, no recurrence",
+                                            "Long first treatment, immediate recurrence",
+                                            "Recurrent and decreasing",
+                                            "Early discontinuation with recurrence",
+                                            "Recurrent after long between-treatment periods"))
+
+# Subset classes that are part of the 2 classes from the 6 class solution
+df_table2 <- subset(df_table2, class_n7 == "Less than a year in treatment" | class_n7 == "Year-long episode, no recurrence" | class_n7 == "Long first treatment, immediate recurrence")
+
+df_table2$class_n7 <- droplevels(df_table2$class_n7)
+
+# Define table 1
+traj_tab2 <- tableby(class_n7 ~ duplicates_filtered + duplicates_filtered2 + # Categorical
+                                tot_time + observed_time + tr_dur01 + notr_dur01 + tr_dur02 + notr_dur02 + tr_dur03 + notr_dur03 +
+                                motivodeegreso_mod_imp_1 + motivoegreso_ult, # Continuous
+                                data = df_table2, numeric.stats=c("mean", "sd", "median", "min", "max", "Nmiss", "N"),
+                     digits=1, digits.p=3, digits.pct=1)
+
+#Summary with labels
+summary(traj_tab2, text=TRUE)
+
+# Export table 2
+write2word(traj_tab2, "C:/Users/ASUS/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/Table_sensi_LCGA.docx", 
+           title="Table supplementary 2", text=TRUE)
+```
+
+# Supplementary material: Graphs 
+```{r eval=FALSE}
+# Quadratic
+data_pred <- as.data.frame(c(1:108))
+data_pred$month <- data_pred$`c(1:108)`
+
+### 2 classes
+n2 <- predictY(m2_2_ng2, data_pred, var.time = "month", draws=T)
+n2_prediction <- as.data.frame(n2$pred)
+n2_prediction$time <- c(1:108)
+
+png("Output/LCGA/108 time points/n2.png", width = 900, height = 500, units = "px")
+ggplot(n2_prediction, aes(x = time)) +
+  geom_line(aes(y = Ypred_2.5_class1), color = "navyblue", lty = 2) +
+  geom_point(aes(y = Ypred_50_class1), color = "navyblue", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class1), color = "navyblue", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class1), color = "navyblue", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class2), color = "deeppink", lty = 2) +
+  geom_point(aes(y = Ypred_50_class2), color = "deeppink", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class2), color = "deeppink", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class2), color = "deeppink", lty = 2) + 
+  theme_classic() +
+  theme(panel.grid.major.y = element_line(color = "grey",
+                                          linetype = 1,
+                                          size = 0.1)) +
+  scale_x_continuous(name = "Months since first admission",
+                     n.breaks = 36,
+                     limits = c(1,108),
+                     expand = c(0,0.5)) + 
+  scale_y_continuous(name = "Pr(Treamtent)",
+                     n.breaks = 6,
+                     limits = c(0,1),
+                     expand = c(0,0)) + 
+  ggtitle("Median probability of substance abuse treatment usage since first admission - 2 class solution")
+dev.off()
+
+### 3 classes
+n3 <- predictY(m2_2_ng3, data_pred, var.time = "month", draws=T)
+n3_prediction <- as.data.frame(n3$pred)
+n3_prediction$time <- c(1:108)
+
+png("Output/LCGA/108 time points/n3.png", width = 900, height = 500, units = "px")
+ggplot(n3_prediction, aes(x = time)) +
+  geom_line(aes(y = Ypred_2.5_class1), color = "deeppink", lty = 2) +
+  geom_point(aes(y = Ypred_50_class1), color = "deeppink", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class1), color = "deeppink", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class1), color = "deeppink", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class2), color = "orange2", lty = 2) +
+  geom_point(aes(y = Ypred_50_class2), color = "orange2", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class2), color = "orange2", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class2), color = "orange2", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class3), color = "navyblue", lty = 2) +
+  geom_point(aes(y = Ypred_50_class3), color = "navyblue", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class3), color = "navyblue", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class3), color = "navyblue", lty = 2) + 
+  theme_classic() +
+  theme(panel.grid.major.y = element_line(color = "grey",
+                                          linetype = 1,
+                                          size = 0.1)) +
+  scale_x_continuous(name = "Months since first admission",
+                     n.breaks = 36,
+                     limits = c(1,108),
+                     expand = c(0,0.5)) + 
+  scale_y_continuous(name = "Pr(Treamtent)",
+                     n.breaks = 6,
+                     limits = c(0,1),
+                     expand = c(0,0)) + 
+  ggtitle("Median probability of substance abuse treatment usage since first admission - 3 class solution")
+dev.off()
+
+### 4 classes
+n4 <- predictY(m2_2_ng4, data_pred, var.time = "month", draws=T)
+n4_prediction <- as.data.frame(n4$pred)
+n4_prediction$time <- c(1:108)
+
+png("Output/LCGA/108 time points/n4.png", width = 900, height = 500, units = "px")
+ggplot(n4_prediction, aes(x = time)) +
+  geom_line(aes(y = Ypred_2.5_class1), color = "#28D6EB", lty = 2) +
+  geom_point(aes(y = Ypred_50_class1), color = "#28D6EB", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class1), color = "#28D6EB", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class1), color = "#28D6EB", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class2), color = "navyblue", lty = 2) +
+  geom_point(aes(y = Ypred_50_class2), color = "navyblue", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class2), color = "navyblue", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class2), color = "navyblue", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class3), color = "orange2", lty = 2) +
+  geom_point(aes(y = Ypred_50_class3), color = "orange2", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class3), color = "orange2", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class3), color = "orange2", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class4), color = "deeppink", lty = 2) +
+  geom_point(aes(y = Ypred_50_class4), color = "deeppink", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class4), color = "deeppink", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class4), color = "deeppink", lty = 2) + 
+  theme_classic() +
+  theme(panel.grid.major.y = element_line(color = "grey",
+                                          linetype = 1,
+                                          size = 0.1)) +
+  scale_x_continuous(name = "Months since first admission",
+                     n.breaks = 36,
+                     limits = c(1,108),
+                     expand = c(0,0.5)) + 
+  scale_y_continuous(name = "Pr(Treamtent)",
+                     n.breaks = 6,
+                     limits = c(0,1),
+                     expand = c(0,0)) + 
+  ggtitle("Median probability of substance abuse treatment usage since first admission - 4 class solution")
+dev.off()
+
+# 5 classes
+n5 <- predictY(m2_2_ng5, data_pred, var.time = "month", draws=T)
+n5_prediction <- as.data.frame(n5$pred)
+n5_prediction$time <- c(1:108)
+
+png("Output/LCGA/108 time points/n5.png", width = 900, height = 500, units = "px")
+ggplot(n5_prediction, aes(x = time)) +
+  geom_line(aes(y = Ypred_2.5_class1), color = "aquamarine3", lty = 2) +
+  geom_point(aes(y = Ypred_50_class1), color = "aquamarine3", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class1), color = "aquamarine3", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class1), color = "aquamarine3", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class2), color = "orange2", lty = 2) + 
+  geom_point(aes(y = Ypred_50_class2), color = "orange2", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class2), color = "orange2", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class2), color = "orange2", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class3), color = "navyblue", lty = 2) +
+  geom_point(aes(y = Ypred_50_class3), color = "navyblue", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class3), color = "navyblue", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class3), color = "navyblue", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class4), color = "deeppink", lty = 2) +
+  geom_point(aes(y = Ypred_50_class4), color = "deeppink", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class4), color = "deeppink", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class4), color = "deeppink", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class5), color = "#28D6EB", lty = 2) +
+  geom_point(aes(y = Ypred_50_class5), color = "#28D6EB", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class5), color = "#28D6EB", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class5), color = "#28D6EB", lty = 2) + 
+  theme_classic() +
+  theme(panel.grid.major.y = element_line(color = "grey",
+                                          linetype = 1,
+                                          size = 0.1)) +
+  scale_x_continuous(name = "Months since first admission",
+                     n.breaks = 36,
+                     limits = c(1,108),
+                     expand = c(0,0.5)) + 
+  scale_y_continuous(name = "Pr(Treamtent)",
+                     n.breaks = 6,
+                     limits = c(0,1),
+                     expand = c(0,0)) + 
+  ggtitle("Median probability of substance abuse treatment usage since first admission - 5 class solution")
+dev.off()
+
+# 6 classes
+n6 <- predictY(m2_2_ng6, data_pred, var.time = "month", draws=T)
+n6_prediction <- as.data.frame(n6$pred)
+n6_prediction$time <- c(1:108)
+
+png("Output/LCGA/108 time points/n6.png", width = 900, height = 500, units = "px")
+ggplot(n6_prediction, aes(x = time)) +
+  geom_line(aes(y = Ypred_2.5_class1), color = "navyblue", lty = 2) +
+  geom_point(aes(y = Ypred_50_class1), color = "navyblue", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class1), color = "navyblue", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class1), color = "navyblue", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class2), color = "aquamarine3", lty = 2) +
+  geom_point(aes(y = Ypred_50_class2), color = "aquamarine3", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class2), color = "aquamarine3", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class2), color = "aquamarine3", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class3), color = "orange2", lty = 2) +
+  geom_point(aes(y = Ypred_50_class3), color = "orange2", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class3), color = "orange2", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class3), color = "orange2", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class4), color = "deeppink", lty = 2) +
+  geom_point(aes(y = Ypred_50_class4), color = "deeppink", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class4), color = "deeppink", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class4), color = "deeppink", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class5), color = "#28D6EB", lty = 2) +
+  geom_point(aes(y = Ypred_50_class5), color = "#28D6EB", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class5), color = "#28D6EB", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class5), color = "#28D6EB", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class6), color = "slateblue", lty = 2) +
+  geom_point(aes(y = Ypred_50_class6), color = "slateblue", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class6), color = "slateblue", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class6), color = "slateblue", lty = 2) + 
+  theme_classic() +
+  theme(panel.grid.major.y = element_line(color = "grey",
+                                          linetype = 1,
+                                          size = 0.1)) +
+  scale_x_continuous(name = "Months since first admission",
+                     n.breaks = 36,
+                     limits = c(1,108),
+                     expand = c(0,0.5)) + 
+  scale_y_continuous(name = "Pr(Treamtent)",
+                     n.breaks = 6,
+                     limits = c(0,1),
+                     expand = c(0,0)) + 
+  ggtitle("Median probability of substance abuse treatment usage since first admission - 6 class solution")
+dev.off()
+
+# 7 classes
+n7 <- predictY(m2_2_ng7, data_pred, var.time = "month", draws=T)
+n7_prediction <- as.data.frame(n7$pred)
+n7_prediction$time <- c(1:108)
+
+png("Output/LCGA/108 time points/n7.png", width = 900, height = 500, units = "px")
+ggplot(n7_prediction, aes(x = time)) +
+  geom_line(aes(y = Ypred_2.5_class1), color = "orange2", lty = 2) +
+  geom_point(aes(y = Ypred_50_class1), color = "orange2", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class1), color = "orange2", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class1), color = "orange2", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class2), color = "#28D6EB", lty = 2) +
+  geom_point(aes(y = Ypred_50_class2), color = "#28D6EB", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class2), color = "#28D6EB", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class2), color = "#28D6EB", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class3), color = "navyblue", lty = 2) +
+  geom_point(aes(y = Ypred_50_class3), color = "navyblue", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class3), color = "navyblue", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class3), color = "navyblue", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class4), color = "deeppink", lty = 2) +
+  geom_point(aes(y = Ypred_50_class4), color = "deeppink", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class4), color = "deeppink", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class4), color = "deeppink", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class5), color = "red", lty = 2) +
+  geom_point(aes(y = Ypred_50_class5), color = "red", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class5), color = "red", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class5), color = "red", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class6), color = "slateblue", lty = 2) +
+  geom_point(aes(y = Ypred_50_class6), color = "slateblue", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class6), color = "slateblue", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class6), color = "slateblue", lty = 2) + 
+  geom_line(aes(y = Ypred_2.5_class7), color = "aquamarine3", lty = 2) +
+  geom_point(aes(y = Ypred_50_class7), color = "aquamarine3", pch = 18, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class7), color = "aquamarine3", lty = 1) + 
+  geom_line(aes(y = Ypred_97.5_class7), color = "aquamarine3", lty = 2) + 
+  theme_classic() +
+  theme(panel.grid.major.y = element_line(color = "grey",
+                                          linetype = 1,
+                                          size = 0.1)) +
+  scale_x_continuous(name = "Months since first admission",
+                     n.breaks = 36,
+                     limits = c(1,108),
+                     expand = c(0,0.5)) + 
+  scale_y_continuous(name = "Pr(Treamtent)",
+                     n.breaks = 6,
+                     limits = c(0,1),
+                     expand = c(0,0)) + 
+  ggtitle("Median probability of substance abuse treatment usage since first admission - 7 class solution")
+dev.off()
+```
+
+# Graph of 7 classes solution for the article
+```{r eval=FALSE}
+data_pred <- as.data.frame(c(1:108))
+data_pred$month <- data_pred$`c(1:108)`
+n7 <- predictY(m2_2_ng7, data_pred, var.time = "month", draws=T)
+n7_prediction <- as.data.frame(n7$pred)
+n7_prediction$time <- c(1:108)
+n7_prediction$year <- n7_prediction$time/12
+
+pdf("Output/LCGA/108 time points/n7_v2.pdf", width = 900, height = 500, units = "px")
+p <- ggplot(n7_prediction, aes(x = time)) +
+  geom_point(aes(y = Ypred_50_class1), color = "#E78AC3", pch = 2, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class1), color = "#E78AC3", lty = 1) + 
+  geom_point(aes(y = Ypred_50_class2), color = "#66C2A5", pch = 4, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class2), color = "#66C2A5", lty = 1) + 
+  geom_point(aes(y = Ypred_50_class3), color = "#FC8D62", pch = 0, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class3), color = "#FC8D62", lty = 1) + 
+  geom_point(aes(y = Ypred_50_class4), color = "#8DA0CB", pch = 3, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class4), color = "#8DA0CB", lty = 1) + 
+  geom_point(aes(y = Ypred_50_class5), color = "#E5C494", pch = 6, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class5), color = "#E5C494", lty = 1) + 
+  geom_point(aes(y = Ypred_50_class6), color = "#A6D854", pch = 5, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class6), color = "#A6D854", lty = 1) + 
+  geom_point(aes(y = Ypred_50_class7), color = "#FFD92F", pch = 1, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class7), color = "#FFD92F", lty = 1) + 
+  theme_classic() +
+  theme(panel.grid.major.y = element_line(color = "grey",
+                                          linetype = 1,
+                                          size = 0.1)) +
+  theme(axis.title.x = element_text(size = rel(1.3)),
+        axis.title.y = element_text(size = rel(1.3)),
+        axis.text = element_text(size = rel(1.2)),
+        title = element_text(size = rel(1.3))) + 
+  scale_x_continuous(name = "Months since first admission",
+                     n.breaks = 36,
+                     limits = c(1,108),
+                     expand = c(0,0.5),
+                     sec.axis = sec_axis(~.x/12, breaks = 0:9, name = "Years since first admission")) + 
+  scale_y_continuous(name = "Pr(Treatment)",
+                     n.breaks = 6,
+                     limits = c(0,1),
+                     expand = c(0,0)) + 
+  ggtitle("Median probability of substance abuse treatment usage since first admission", subtitle = "7 class solution")
+
+dev.off()
+
+# Set the default theme
+theme_set(theme_classic())
+
+# Create the plot
+p <- ggplot(n7_prediction, aes(x = time)) +
+  geom_point(aes(y = Ypred_50_class1), color = "#E78AC3", pch = 2, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class1), color = "#E78AC3", lty = 1) + 
+  geom_point(aes(y = Ypred_50_class2), color = "#66C2A5", pch = 4, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class2), color = "#66C2A5", lty = 1) + 
+  geom_point(aes(y = Ypred_50_class3), color = "#FC8D62", pch = 0, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class3), color = "#FC8D62", lty = 1) + 
+  geom_point(aes(y = Ypred_50_class4), color = "#8DA0CB", pch = 3, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class4), color = "#8DA0CB", lty = 1) + 
+  geom_point(aes(y = Ypred_50_class5), color = "#E5C494", pch = 6, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class5), color = "#E5C494", lty = 1) + 
+  geom_point(aes(y = Ypred_50_class6), color = "#A6D854", pch = 5, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class6), color = "#A6D854", lty = 1) + 
+  geom_point(aes(y = Ypred_50_class7), color = "#FFD92F", pch = 1, cex = 3) + 
+  geom_line(aes(y = Ypred_50_class7), color = "#FFD92F", lty = 1) + 
+  theme(panel.grid.major.y = element_line(color = "grey",
+                                          linetype = 1,
+                                          size = 0.1),
+        axis.title.x = element_text(size = rel(1.3)),
+        axis.title.y = element_text(size = rel(1.3)),
+        axis.text = element_text(size = rel(1.2)),
+        title = element_text(size = rel(1.3))) + 
+  scale_x_continuous(name = "Months since first admission",
+                     n.breaks = 36,
+                     limits = c(1,108),
+                     expand = c(0,0.5),
+                     sec.axis = sec_axis(~.x/12, breaks = 0:9, name = "Years since first admission")) + 
+  scale_y_continuous(name = "Pr(Treatment)",
+                     n.breaks = 6,
+                     limits = c(0,1),
+                     expand = c(0,0)) + 
+  ggtitle("Median probability of substance abuse treatment usage since first admission", subtitle = "7 class solution")
+
+ggsave("Output/LCGA/108 time points/Figure_1.pdf", 
+       width = 1800, height = 1000, units = "px")
+```
+
+# Supplementary: Table with characteristics of the classes 
+```{r}
+load("Output/LCGA/108 time points/lcga_ft_quadratic_n7.Rda") ## Load 7-class solution
+#load("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n7.Rda") ## Load 7-class solution
+
+## Select covariables for table 1
+df2 <- dplyr::select(df, urban_1, sex, age, age_groups, escolaridad_rec, estatus_ocupacional, vive_con, estado_conyugal_2, 
+                     numero_de_hijos_mod, sus_principal_mod,
+                     macrozona, plan_1, facility_rec_1,
+                     duplicates_filtered, tot_time, tr_dur01, notr_dur01, tr_dur02, notr_dur02, tr_dur03, notr_dur03, tr_dur04,
+                     egreso_1, motivoegreso_ult) 
+
+df2$id <- (c(1:6266))
+
+# Take results of model
+pprob <- m2_2_ng7$pprob
+
+# Merge
+df2 <- merge(df2, pprob, by = "id") 
+
+# Recode trajectories
+df2 <- df2 %>%
+  mutate_at(vars("class"),
+            function(x) car::recode(x, "3=1;6=2;5=3;2=4;1=5;7=6;4=7")) 
+
+df2[c("class")] <- lapply(df2[c("class")], factor,
+                                 levels=c("1", 
+                                          "2",
+                                          "3",
+                                          "4",
+                                          "5",
+                                          "6",
+                                          "7"), 
+                                 labels = c("Early discontinuation",
+                                            "Less than a year",
+                                            "Year-long episode, no recurrence",
+                                            "Long first treatment, or immediate recurrence",
+                                            "Recurrent and decreasing",
+                                            "Early discontinuation with reccurence",
+                                            "Recurrent after long period"))
+
+# Account for the amount on people that participated in each treatment episode
+df2$duplicates_filtered <- as.numeric(df2$duplicates_filtered)
+
+df2$notr_dur01[df2$duplicates_filtered==1] <- NA
+df2$tr_dur02[df2$duplicates_filtered<2] <- NA
+df2$notr_dur02[df2$duplicates_filtered<=2] <- NA
+df2$tr_dur03[df2$duplicates_filtered<3] <- NA
+df2$notr_dur03[df2$duplicates_filtered<=3] <- NA
+df2$tr_dur04[df2$duplicates_filtered<4] <- NA
+
+df2$duplicates_filtered2 <- as.factor(df2$duplicates_filtered)
+
+
+traj_tab1 <- tableby(class ~ urban_1 + sex + age + age_groups + escolaridad_rec + estatus_ocupacional + vive_con + 
+                             estado_conyugal_2 + numero_de_hijos_mod + sus_principal_mod +
+                             macrozona + plan_1 + facility_rec_1 +
+                             duplicates_filtered + tot_time + tr_dur01 + notr_dur01 + tr_dur02 + notr_dur02 + tr_dur03 + notr_dur03 + tr_dur04 +
+                             egreso_1 + motivoegreso_ult, 
+                                     data = df2, numeric.stats=c("mean", "sd", "median", "min", "max", "Nmiss", "N"),
+                                     digits=1, digits.p=3, digits.pct=1)
+
+summary(traj_tab1, text=TRUE)
+
+# Export table 1
+# write2word(traj_tab1, "Table_sup1.docx", title="Table supplementary", text=TRUE)
+```
+
+# Model predicting the classes
+## Dataset
+```{r}
+load("Output/LCGA/108 time points/lcga_ft_quadratic_n7.Rda") ## Load 7-class solution
+#load("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n7.Rda") ## Load 7-class solution
+
+# Select covariables for the model
+df2 <- df %>%
+ dplyr::select(rut_enc_saf,	plan_1, facility_rec_1, macrozona, urban_1,
+               sex, age_groups, escolaridad_rec, estado_conyugal_2, estatus_ocupacional, vive_con, numero_de_hijos_mod,  
+               sus_principal_mod)
+
+# Create id
+df2$id <- (c(1:6266))
+
+# Take results of model
+pprob <- m2_2_ng7$pprob
+
+# Merge
+df2 <- merge(df2, pprob, by = "id") 
+
+# Recode trajectories
+df2 <- df2 %>%
+  mutate_at(vars("class"),
+            function(x) car::recode(x, "3=1;6=2;5=3;2=4;1=5;7=6;4=7")) 
+
+df2[c("class")] <- lapply(df2[c("class")], factor,
+                                 levels=c("1", 
+                                          "2",
+                                          "3",
+                                          "4",
+                                          "5",
+                                          "6",
+                                          "7"), 
+                                 labels = c("Early discontinuation",
+                                            "Less than a year",
+                                            "Year-long episode, no recurrence",
+                                            "Long first treatment, or immediate recurrence",
+                                            "Recurrent and decreasing",
+                                            "Early discontinuation with reccurence",
+                                            "Recurrent after long period"))
+```
+
+## Multivariate 
+### Not imputed
+```{r}
+# Function for exporting the results
+multinom_pivot_wider <- function(x) {
+  # check inputs match expectatations
+  if (!inherits(x, "tbl_regression") || !inherits(x$model_obj, "multinom")) {
+    stop("`x=` must be class 'tbl_regression' summary of a `nnet::multinom()` model.")
+  }
+  
+  # create tibble of results
+  df <- tibble::tibble(outcome_level = unique(x$table_body$groupname_col))
+  df$tbl <- 
+    purrr::map(
+      df$outcome_level,
+      function(lvl) {
+        gtsummary::modify_table_body(
+          x, 
+          ~dplyr::filter(.x, .data$groupname_col %in% lvl) %>%
+            dplyr::ungroup() %>%
+            dplyr::select(-.data$groupname_col)
+        )
+      }
+    )
+  
+  tbl_merge(df$tbl, tab_spanner = paste0("**", df$outcome_level, "**"))
+}
+
+# Missing by variable
+colSums(is.na(df2)) / nrow(df2)*100 
+
+### MULTIVARIATE MODEL
+# multinom model tabulated with gtsummary
+set.seed(2002)
+tbl <- nnet::multinom(class ~ macrozona + plan_1 + facility_rec_1 +  urban_1 + 
+                              sex +  age_groups + escolaridad_rec + estatus_ocupacional + estado_conyugal_2 + vive_con + numero_de_hijos_mod +   
+                              sus_principal_mod,  
+                 data = df2) %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  multinom_pivot_wider()
+
+# Export results
+tbl %>%
+  gtsummary::as_gt() %>% 
+  gt::gtsave(., "Output/LCGA/108 time points/m_classes_n7.rtf")
+
+
+m_lcga <- nnet::multinom(class ~ macrozona + plan_1 + facility_rec_1 +  urban_1 + 
+                              sex +  age_groups + escolaridad_rec + estatus_ocupacional + estado_conyugal_2 + vive_con + numero_de_hijos_mod +   
+                              sus_principal_mod,
+                         data = df2)
+
+# See number of observations
+n_units <- nrow(model.matrix(m_lcga))
+n_units
+
+# Extract fit (AIC and others)
+lrtest(m_lcga)
+summary(m_lcga)
+```
+
+### Multiple imputations
+```{r}
+# Explore missing data patterns
+p_missing <- (unlist(lapply(df2, function(x) sum(is.na(x))))/nrow(df2))*100
+sort(p_missing[p_missing > 0], decreasing = TRUE)
+
+# We run the mice code with 0 iterations 
+imp <- mice(df2, maxit=0)
+
+# Extract predictorMatrix and methods of imputation 
+predM <- imp$predictorMatrix
+meth <- imp$method
+
+# Setting values of variables I'd like to leave out to 0 in the predictor matrix
+predM[, c("id", "rut_enc_saf")] <- 0
+
+# If you like, view the first few rows of the predictor matrix
+head(predM)
+
+# Specify a separate imputation model for variables of interest 
+names(df2)
+
+# Ordered categorical variables 
+poly <- c("age_groups", "numero_de_hijos_mod", "escolaridad_rec")
+
+# Unordered categorical variable 
+poly2 <- c("estado_conyugal_2", "urban_1")
+
+# Turn their methods matrix into the specified imputation models
+meth[num] <- "norm.boot"
+meth[log] <- "logreg.boot"
+meth[poly] <- "polr"
+meth[poly2] <- "polyreg"
+
+meth
+
+imp2 <- mice(df2, maxit = 20, 
+             predictorMatrix = predM, 
+             method = meth, print =  FALSE)
+
+fitimp <- with(imp2,
+               multinom(class ~ macrozona + plan_1 + facility_rec_1 +  urban_1 + 
+                              sex +  age_groups + escolaridad_rec + estatus_ocupacional + estado_conyugal_2 + vive_con + numero_de_hijos_mod +   
+                              sus_principal_mod,
+                         data = df2))
+
+pooled <- (pool(fitimp))
+class(pooled)
+
+summary(pool(fitimp), conf.int = TRUE, exponentiate = TRUE)
+```
+
+## Bivariate
+```{r}
+set.seed(2002)
+tbl <- nnet::multinom(class ~ macrozona,  
+                 data = df2) %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  multinom_pivot_wider()
+
+tbl %>%
+  gtsummary::as_gt() %>% 
+  gt::gtsave(., "Output/LCGA/108 time points/m_classes_n7_b1.rtf")
+
+
+set.seed(2002)
+tbl <- nnet::multinom(class ~ plan_1 ,  
+                 data = df2) %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  multinom_pivot_wider()
+
+tbl %>%
+  gtsummary::as_gt() %>% 
+  gt::gtsave(., "Output/LCGA/108 time points/m_classes_n7_b2.rtf")
+
+
+set.seed(2002)
+tbl <- nnet::multinom(class ~ facility_rec_1,  
+                 data = df2) %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  multinom_pivot_wider()
+
+tbl %>%
+  gtsummary::as_gt() %>% 
+  gt::gtsave(., "Output/LCGA/108 time points/m_classes_n7_b3.rtf")
+
+set.seed(2002)
+tbl <- nnet::multinom(class ~ urban_1,  
+                 data = df2) %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  multinom_pivot_wider()
+
+tbl %>%
+  gtsummary::as_gt() %>% 
+  gt::gtsave(., "Output/LCGA/108 time points/m_classes_n7_b4.rtf")
+
+set.seed(2002)
+tbl <- nnet::multinom(class ~ sex,  
+                 data = df2) %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  multinom_pivot_wider()
+
+tbl %>%
+  gtsummary::as_gt() %>% 
+  gt::gtsave(., "Output/LCGA/108 time points/m_classes_n7_b5.rtf")
+
+set.seed(2002)
+tbl <- nnet::multinom(class ~ age_groups,  
+                 data = df2) %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  multinom_pivot_wider()
+
+tbl %>%
+  gtsummary::as_gt() %>% 
+  gt::gtsave(., "Output/LCGA/108 time points/m_classes_n7_b6.rtf")
+
+set.seed(2002)
+tbl <- nnet::multinom(class ~ escolaridad_rec,  
+                 data = df2) %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  multinom_pivot_wider()
+
+tbl %>%
+  gtsummary::as_gt() %>% 
+  gt::gtsave(., "Output/LCGA/108 time points/m_classes_n7_b7.rtf")
+
+set.seed(2002)
+tbl <- nnet::multinom(class ~ estatus_ocupacional,  
+                 data = df2) %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  multinom_pivot_wider()
+
+tbl %>%
+  gtsummary::as_gt() %>% 
+  gt::gtsave(., "Output/LCGA/108 time points/m_classes_n7_b8.rtf")
+
+set.seed(2002)
+tbl <- nnet::multinom(class ~ estado_conyugal_2,  
+                 data = df2) %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  multinom_pivot_wider()
+
+tbl %>%
+  gtsummary::as_gt() %>% 
+  gt::gtsave(., "Output/LCGA/108 time points/m_classes_n7_b9.rtf")
+
+set.seed(2002)
+tbl <- nnet::multinom(class ~ vive_con,  
+                 data = df2) %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  multinom_pivot_wider()
+
+tbl %>%
+  gtsummary::as_gt() %>% 
+  gt::gtsave(., "Output/LCGA/108 time points/m_classes_n7_b10.rtf")
+
+set.seed(2002)
+tbl <- nnet::multinom(class ~ numero_de_hijos_mod,  
+                 data = df2) %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  multinom_pivot_wider()
+
+tbl %>%
+  gtsummary::as_gt() %>% 
+  gt::gtsave(., "Output/LCGA/108 time points/m_classes_n7_b11.rtf")
+
+set.seed(2002)
+tbl <- nnet::multinom(class ~ sus_principal_mod,  
+                 data = df2) %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  multinom_pivot_wider()
+
+tbl %>%
+  gtsummary::as_gt() %>% 
+  gt::gtsave(., "Output/LCGA/108 time points/m_classes_n7_b13.rtf")
+```
+
+# Sensitivity analysis: Half time points
+
+## Data managment
+```{r}
+
+```
+
+## Model estimation
+```{r}
+
+```
+
+## Load models
+```{r}
+# Load models - half time points
+load("Output/LCGA/Half timepoints/mod_qd_n6_htime2.Rda") 
+
+## 1 classes
+m_hlftime_n1 <- mod_qd6[[1]]
+summary(m_hlftime_n1)
+
+## 6 classes
+m_hlftime_n6 <- mod_qd6[[2]]
+summary(m_hlftime_n6)
+
+## 7 classes
+m_hlftime_n7 <- mod_qd6[[5]]
+summary(m_hlftime_n7)
+
+summarytable(m_hlftime_n1, m_hlftime_n6, m_hlftime_n7, which = c("G", "loglik", "conv", "npm", "AIC", "BIC", "SABIC", "ICL", "entropy", "%class"))
+
+## Comparison between both solutions with 7 classes
+load("Output/LCGA/108 time points/lcga_ft_quadratic_n7.Rda") ## Load 7-class solution
+
+df2 <- df
+
+# Create id
+df2$id <- (c(1:6266))
+
+# Take results of model with half timepoints
+pprob1 <- m2_2_ng7$pprob
+pprob1 <- pprob1 %>% rename(class7_ctime = class)
+
+# Take results of model with half timepoints
+pprob2 <- m_hlftime_n7$pprob
+pprob2 <- pprob2 %>% rename(class7_htime = class)
+
+# Merge
+df2 <- merge(df2, pprob1, by = "id") 
+df2 <- merge(df2, pprob2, by = "id") 
+
+tab1 <- table(df2$class7_ctime)/6266*100
+tab1
+
+tab1 <- table(df2$class7_htime)/6266*100
+tab1
+
+tab2 <- table(df2$class7_ctime, df2$class7_htime)
+b <- prop.table(tab2, margin =1)*100
+b
+
+table(df2$class7_ctime)
+#    1    2    3    4    5    6    7 
+#  887  393 2007  356  768 1236  619 
+
+table(df2$class7_htime)
+```
+
+## Model predicting classes half timepoints
+```{r}
+df2 <- df %>%
+ dplyr::select(rut_enc_saf,	plan_1, facility_rec_1, macrozona, urban_1,
+               sex, age_groups, escolaridad_rec, estado_conyugal_2, estatus_ocupacional, vive_con, numero_de_hijos_mod,  
+               sus_principal_mod)
+
+# Create id
+df2$id <- (c(1:6266))
+
+# Take results of model
+pprob <- m_hlftime_n7$pprob
+
+# Merge
+df2 <- merge(df2, pprob, by = "id") 
+
+a <- table(df2$class)
+round(prop.table(a)*100, 1)
+
+# Recode trajectories
+df2 <- df2 %>%
+  mutate_at(vars("class"),
+            function(x) car::recode(x, "4=1;5=2;1=3;2=4;3=5;7=6;6=7")) 
+
+df2[c("class")] <- lapply(df2[c("class")], factor,
+                                 levels=c("1", 
+                                          "2",
+                                          "3",
+                                          "4",
+                                          "5",
+                                          "6",
+                                          "7"), 
+                                 labels = c("Early discontinuation",
+                                            "Less than a year",
+                                            "Year-long episode, no recurrence",
+                                            "Long first treatment, immediate recurrence",
+                                            "Recurrent and decreasing",
+                                            "Early discontinuation with reccurence",
+                                            "Recurrent after long period"))
+
+# MULTIVARIATE MODEL
+set.seed(2002)
+tbl <- nnet::multinom(class ~ plan_1 + facility_rec_1 + macrozona + urban_1 + 
+                              sex +  age_groups + escolaridad_rec + estado_conyugal_2 + estatus_ocupacional + vive_con + numero_de_hijos_mod +   
+                              sus_principal_mod,  
+                 data = df2) %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  multinom_pivot_wider()
+
+tbl %>%
+  gtsummary::as_gt() %>% 
+  gt::gtsave(., "Output/LCGA/Half timepoints/m_classes_n7_htime.rtf")
+
+m_lcga <- nnet::multinom(class ~ plan_1 + facility_rec_1 + macrozona + urban_1 + 
+                              sex +  age_groups + escolaridad_rec + estado_conyugal_2 + estatus_ocupacional + vive_con + numero_de_hijos_mod +   
+                              sus_principal_mod,
+                         data = df2)
+
+# Number of observations
+n_units <- nrow(model.matrix(m_lcga))
+n_units
+
+# Extract AIC
+summary(m_lcga)
+lrtest(m_lcga)
+```
+

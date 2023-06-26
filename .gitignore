@@ -1,0 +1,16 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.RData
+*.Rda
+*.dta
+*.txt
+*.docx
+/Output/*
+/Scripts/*
+*Data.Rproj
+*df_q1.xlsx
+*ssa_bigpurple.Rmd
+*ssa_ws.Rmd
+*ssa_old.Rmd
