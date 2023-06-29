@@ -33,8 +33,8 @@ library(parameters)
 
 # Loading data
 ```{r include=FALSE}
-#setwd("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data") # NYU Langone PC
-setwd('C:/Users/ASUS/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data') # Personal PC
+setwd("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data") # NYU Langone PC
+#setwd('C:/Users/ASUS/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data') # Personal PC
 
 # Read dataset
 df_ori <- read_dta('fiscalia_ig_bo_sep_2022_match_SENDA.dta')
@@ -1153,7 +1153,8 @@ save(m2_2_ng7, file = "lcga_ft_quadratic_n7.Rda")
 
 # 8 classes
 set.seed(2002)
-m2_2_ng8 <- lcmm(fixed = treat_use ~ month+I(month^2),
+m2_2_ng8 <- gridsearch(rep = 10, maxiter = 300, minit = m2_2,
+                         lcmm(fixed = treat_use ~ month+I(month^2),
                          mixture = ~ month+I(month^2),
                          random= ~ 1, 
                          link="thresholds",
@@ -1163,7 +1164,7 @@ m2_2_ng8 <- lcmm(fixed = treat_use ~ month+I(month^2),
                          maxiter = 500,
                          verbose = TRUE,
                          nproc = 16,
-                         B = random(m2_2))
+                         B = random(m2_2)))
 
 save(m2_2_ng8, file = "lcga_ft_quadratic_n8.Rda")
 ```
@@ -1356,7 +1357,7 @@ LCTMcompare(m2_2_ng6, m2_2_ng7)
 ```
 
 ## Table
-```{r}
+```{r eval=FALSE}
 #df <- df_f
 load("Output/LCGA/108 time points/lcga_ft_quadratic_n7.Rda") ## Load 7-class solution
 
@@ -1769,7 +1770,7 @@ ggsave("Output/LCGA/108 time points/Figure_1.pdf",
 ```
 
 # Supplementary: Table with characteristics of the classes 
-```{r}
+```{r eval=FALSE}
 load("Output/LCGA/108 time points/lcga_ft_quadratic_n7.Rda") ## Load 7-class solution
 #load("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n7.Rda") ## Load 7-class solution
 
@@ -1838,7 +1839,7 @@ summary(traj_tab1, text=TRUE)
 
 # Model predicting the classes
 ## Dataset
-```{r}
+```{r eval=FALSE}
 load("Output/LCGA/108 time points/lcga_ft_quadratic_n7.Rda") ## Load 7-class solution
 #load("C:/Users/ib2473/CJS UC Dropbox/Ignacio Bórquez/SUD traj/Data/Output/LCGA/108 time points/lcga_ft_quadratic_n7.Rda") ## Load 7-class solution
 
@@ -1881,7 +1882,7 @@ df2[c("class")] <- lapply(df2[c("class")], factor,
 
 ## Multivariate 
 ### Not imputed
-```{r}
+```{r eval=FALSE}
 # Function for exporting the results
 multinom_pivot_wider <- function(x) {
   # check inputs match expectatations
@@ -1941,7 +1942,7 @@ summary(m_lcga)
 ```
 
 ### Multiple imputations
-```{r}
+```{r eval=FALSE}
 # Explore missing data patterns
 p_missing <- (unlist(lapply(df2, function(x) sum(is.na(x))))/nrow(df2))*100
 sort(p_missing[p_missing > 0], decreasing = TRUE)
@@ -1993,7 +1994,7 @@ summary(pool(fitimp), conf.int = TRUE, exponentiate = TRUE)
 ```
 
 ## Bivariate
-```{r}
+```{r eval=FALSE}
 set.seed(2002)
 tbl <- nnet::multinom(class ~ macrozona,  
                  data = df2) %>%
@@ -2118,21 +2119,153 @@ tbl %>%
 ```
 
 # Sensitivity analysis: Half time points
-
 ## Data managment
-```{r}
+```{r eval=FALSE}
+df2 <- df %>%
+ dplyr::select(rut_enc_saf,	plan_1, facility_rec_1, macrozona, urban_1,
+               sex, age, age_groups, escolaridad_rec, estado_conyugal_2, estatus_ocupacional, vive_con, sus_principal_mod, numero_de_hijos_mod,
+        months_001,	months_003,	months_005,	months_007,	months_009,	months_011,	
+        months_013,	months_015,	months_017,	months_019,	months_021,	months_023,	
+        months_025,	months_027,	months_029,	months_031,	months_033,	months_035,	
+        months_037,	months_039,	months_041,	months_043,	months_045,	months_047,	
+        months_049,	months_051,	months_053,	months_055,	months_057,	months_059,	
+        months_061,	months_063,	months_065,	months_067,	months_069,	months_071,	
+        months_073,	months_075,	months_077,	months_079,	months_081,	months_083,
+        months_085,	months_087,	months_089,	months_091,	months_093,	months_095,
+        months_097,	months_099,	months_101,	months_103,	months_105,	months_107,	
+        months_109)
 
+# Create id for subsequent merge
+df2$id <- (c(1:6266))
+
+# Transform to long
+long <- df2 %>%
+  pivot_longer(cols=c(15:69),
+               names_to = "months", 
+               values_to = "treat_use"
+               )
+
+# Create time variable
+long$month <- NA
+long$month[long$months == 'months_001'] <- 1
+long$month[long$months == 'months_003'] <- 3
+long$month[long$months == 'months_005'] <- 5
+long$month[long$months == 'months_007'] <- 7
+long$month[long$months == 'months_009'] <- 9
+long$month[long$months == 'months_011'] <- 11
+long$month[long$months == 'months_013'] <- 13
+long$month[long$months == 'months_015'] <- 15
+long$month[long$months == 'months_017'] <- 17
+long$month[long$months == 'months_019'] <- 19
+long$month[long$months == 'months_021'] <- 21
+long$month[long$months == 'months_023'] <- 23
+long$month[long$months == 'months_025'] <- 25
+long$month[long$months == 'months_027'] <- 27
+long$month[long$months == 'months_029'] <- 29
+long$month[long$months == 'months_031'] <- 31
+long$month[long$months == 'months_033'] <- 33
+long$month[long$months == 'months_035'] <- 35
+long$month[long$months == 'months_037'] <- 37
+long$month[long$months == 'months_039'] <- 39
+long$month[long$months == 'months_041'] <- 41
+long$month[long$months == 'months_043'] <- 43
+long$month[long$months == 'months_045'] <- 45
+long$month[long$months == 'months_047'] <- 47
+long$month[long$months == 'months_049'] <- 49
+long$month[long$months == 'months_051'] <- 51
+long$month[long$months == 'months_053'] <- 53
+long$month[long$months == 'months_055'] <- 55
+long$month[long$months == 'months_057'] <- 57
+long$month[long$months == 'months_059'] <- 59
+long$month[long$months == 'months_061'] <- 61
+long$month[long$months == 'months_063'] <- 63
+long$month[long$months == 'months_065'] <- 65
+long$month[long$months == 'months_067'] <- 67
+long$month[long$months == 'months_069'] <- 69
+long$month[long$months == 'months_071'] <- 71
+long$month[long$months == 'months_073'] <- 73
+long$month[long$months == 'months_075'] <- 75
+long$month[long$months == 'months_077'] <- 77
+long$month[long$months == 'months_079'] <- 79
+long$month[long$months == 'months_081'] <- 81
+long$month[long$months == 'months_083'] <- 83
+long$month[long$months == 'months_085'] <- 85
+long$month[long$months == 'months_087'] <- 87
+long$month[long$months == 'months_089'] <- 89
+long$month[long$months == 'months_091'] <- 91
+long$month[long$months == 'months_093'] <- 93
+long$month[long$months == 'months_095'] <- 95
+long$month[long$months == 'months_097'] <- 97
+long$month[long$months == 'months_099'] <- 99
+long$month[long$months == 'months_101'] <- 101
+long$month[long$months == 'months_103'] <- 103
+long$month[long$months == 'months_105'] <- 105
+long$month[long$months == 'months_107'] <- 107
+long$month[long$months == 'months_109'] <- 109
+
+#save(long, file = "lcga_halftime.Rda")
 ```
 
 ## Model estimation
-```{r}
+```{r eval=FALSE}
+load("lcga_halftime.Rda")
+#tail(long)
+#class(long)
 
+# probit
+set.seed(2002)
+mod_qd6[[1]]=lcmm(fixed = treat_use ~ month+I(month^2),
+              random= ~ 1,
+              link="thresholds",
+              subject = "id",
+              data = long,
+              maxiter = 500,
+              verbose = TRUE,
+              nproc = 16)
+
+mod_qd6[[2]]=lcmm(fixed = treat_use ~ month +I(month^2),
+                         mixture = ~ month +I(month^2),
+                         random= ~ 1,
+                         link="thresholds",
+                         subject = "id",
+                         ng=6,
+                         data = long,
+                         maxiter = 300,
+                         verbose = TRUE,
+                         nproc = 24,
+                         B = mod_qd6[[1]])
+
+mod_qd6[[3]]=lcmm(fixed = treat_use ~ month +I(month^2),
+                         mixture = ~ month +I(month^2),
+                         random= ~ 1,
+                         link="thresholds",
+                         subject = "id",
+                         ng=7,
+                         data = long,
+                         maxiter = 300,
+                         verbose = TRUE,
+                         nproc = 24,
+                         B = mod_qd6[[1]])
+
+mod_qd6[[4]]=gridsearch(rep = 10, maxiter = 300, minit = mod_qd6[[1]],
+                    lcmm(fixed = treat_use ~ month+I(month^2),
+                         mixture = ~ month+I(month^2),
+                         random= ~ 1,
+                         link="thresholds",
+                         subject = "id",
+                         ng=8,
+                         data = long,
+                         maxiter = 300,
+                         verbose = TRUE),
+                         cl=24)
+
+save(mod_qd6, file="mod_1_ht.Rda")
 ```
 
 ## Load models
-```{r}
+```{r eval=FALSE}
 # Load models - half time points
-load("Output/LCGA/Half timepoints/mod_qd_n6_htime2.Rda") 
+load("Output/LCGA/Half timepoints/mod_1_ht.Rda") 
 
 ## 1 classes
 m_hlftime_n1 <- mod_qd6[[1]]
@@ -2186,7 +2319,7 @@ table(df2$class7_htime)
 ```
 
 ## Model predicting classes half timepoints
-```{r}
+```{r eval=FALSE}
 df2 <- df %>%
  dplyr::select(rut_enc_saf,	plan_1, facility_rec_1, macrozona, urban_1,
                sex, age_groups, escolaridad_rec, estado_conyugal_2, estatus_ocupacional, vive_con, numero_de_hijos_mod,  
@@ -2251,4 +2384,3 @@ n_units
 summary(m_lcga)
 lrtest(m_lcga)
 ```
-
